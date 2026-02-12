@@ -28,6 +28,7 @@ dist/
 **/TAGS
 
 # nix
+.direnv/
 result
 result-[0-9]*
 .stack-to-nix.cache
