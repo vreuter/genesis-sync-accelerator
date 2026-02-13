@@ -270,7 +270,19 @@ getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> [ChunkNo]
 getChunksInRange chunkInfo from to =
   let startChunk = chunkForFrom chunkInfo from
       endChunk = chunkForTo chunkInfo to
-   in ChunkInfo.chunksBetween startChunk endChunk
+   in chunksBetween startChunk endChunk
+  where
+    -- TODO: chunksBetween from ouroborous-consensus is incorrect, override locally to avoid this issue.
+    -- Remove this function when the fix is merged upstream.
+    -- NOTE: We cannot deconstruct ChunkNo, so instead we must use the `nextChunkNo` function.
+    chunksBetween :: ChunkNo -> ChunkNo -> [ChunkNo]
+    chunksBetween a b = if a <= b then chunksBetween' a b else chunksBetween' b a
+      where
+        -- | chunksBetween but with known sorted arguments
+        chunksBetween' :: ChunkNo -> ChunkNo -> [ChunkNo]
+        chunksBetween' a b
+          | a == b = [a]
+          | otherwise = a : chunksBetween (ChunkInfo.nextChunkNo a) b
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo
