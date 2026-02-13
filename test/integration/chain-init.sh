@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 MIN_CHUNKS="${MIN_CHUNKS:-10}"
 TIMEOUT=600
-DB_DIR="${DB_DIR:-./test-data/source-db}"
+DB_DIR="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
 NODE_PORT=13713
 CONFIG="$SCRIPT_DIR/config/config.json"
 TOPOLOGY="$SCRIPT_DIR/config/topology.json"
@@ -28,7 +28,7 @@ WORKDIR="$(dirname "$DB_DIR")"
 mkdir -p "$WORKDIR" "$DB_DIR"
 
 NODE_PID=""
-trap 'if [[ -n "$NODE_PID" ]]; then kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null; fi; rm -f "$WORKDIR/node.sock"' EXIT
+trap 'if [[ -n "$NODE_PID" ]]; then kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null || true; fi; rm -f "$WORKDIR/node.sock"' EXIT
 
 cardano-node run \
   --config "$CONFIG" \
@@ -48,7 +48,7 @@ while (( ELAPSED < TIMEOUT )); do
 
   if (( CHUNKS >= MIN_CHUNKS )); then
     echo "${GREEN}Done:${NC} $CHUNKS chunks synced."
-    kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null; NODE_PID=""
+    kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null || true; NODE_PID=""
     exit 0
   fi
 
