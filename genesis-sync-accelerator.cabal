@@ -1,4 +1,4 @@
-cabal-version: 3.0
+cabal-version: 3.4
 name: genesis-sync-accelerator
 version: 0.1.0.0
 license: Apache-2.0
@@ -8,8 +8,15 @@ build-type: Simple
 
 executable genesis-sync-accelerator
   main-is: Main.hs
-  hs-source-dirs: app, src
-  ghc-options: -threaded -rtsopts "-with-rtsopts=-N -I0 -A16m"
+  hs-source-dirs:
+    app
+    src
+
+  ghc-options:
+    -threaded
+    -rtsopts
+    "-with-rtsopts=-N -I0 -A16m"
+
   other-modules:
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
@@ -18,10 +25,12 @@ executable genesis-sync-accelerator
     GenesisSyncAccelerator.RemoteStorage
     GenesisSyncAccelerator.Tracing
     GenesisSyncAccelerator.Types
+
   build-depends:
     base,
     bytestring,
     cardano-crypto-class,
+    cardano-strict-containers,
     cborg,
     containers,
     contra-tracer,
@@ -43,9 +52,10 @@ executable genesis-sync-accelerator
     ouroboros-network-api,
     ouroboros-network-framework,
     ouroboros-network-protocols,
+    ouroboros-network-testing,
     resource-registry,
     stm,
     text,
     transformers,
     transformers-except,
-    with-utf8
+    with-utf8,
