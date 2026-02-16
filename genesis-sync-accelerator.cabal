@@ -50,7 +50,9 @@ executable genesis-sync-accelerator
     GenesisSyncAccelerator.Types
 
   build-depends:
+    aeson,
     async,
+    base16-bytestring,
     bytestring,
     cardano-crypto-class,
     cborg,
@@ -94,7 +96,9 @@ library
     GenesisSyncAccelerator.Types
 
   build-depends:
+    aeson,
     async,
+    base16-bytestring,
     bytestring,
     cborg,
     containers,
