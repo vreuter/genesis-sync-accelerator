@@ -270,7 +270,13 @@ getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> [ChunkNo]
 getChunksInRange chunkInfo from to =
   let startChunk = chunkForFrom chunkInfo from
       endChunk = chunkForTo chunkInfo to
-   in ChunkInfo.chunksBetween startChunk endChunk
+   in chunksBetween startChunk endChunk
+ where
+  -- TODO: chunksBetween from ouroborous-consensus is incorrect, override locally to avoid this issue.
+  -- Remove this function when the fix is merged upstream.
+  -- See: https://github.com/tweag/genesis-sync-accelerator/issues/7
+  chunksBetween :: ChunkNo -> ChunkNo -> [ChunkNo]
+  chunksBetween (ChunkNo a) (ChunkNo b) = map ChunkNo $ if b < a then [b .. a] else [a .. b]
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo
