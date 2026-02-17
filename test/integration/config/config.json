@@ -6,6 +6,7 @@
   "ConwayGenesisFile": "conway-genesis.json",
   "ConwayGenesisHash": "0eb6adaec3fcb1fe286c1b4ae0da2a117eafc3add51e17577d36dd39eddfc3db",
   "EnableP2P": true,
+  "PeerSharing": false,
   "LastKnownBlockVersion-Alt": 0,
   "LastKnownBlockVersion-Major": 2,
   "LastKnownBlockVersion-Minor": 0,
