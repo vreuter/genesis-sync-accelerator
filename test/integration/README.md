@@ -5,6 +5,7 @@
 Running this test requires a few tools to be in PATH including:
 
 - `cardano-node`
+- `db-analyser` (from `ouroboros-consensus-cardano`)
 - `python3`
 
 And of course `genesis-sync-accelerator`. The easiest way to get them is to enter
@@ -50,8 +51,9 @@ The test:
 2. Starts a local HTTP CDN serving the source immutable chunks
 3. Starts the accelerator pointing at the CDN with an empty cache
 4. Starts a consumer `cardano-node` that syncs only from the accelerator
-5. Polls the consumer's ImmutableDB until all expected chunks appear (default timeout: 120s)
-6. Validates each chunk/primary/secondary file against the source via `sha256sum`
+5. Polls the accelerator's cache until all source chunks are downloaded (default timeout: 120s)
+6. Validates each cached chunk/primary/secondary file against the source via `sha256sum`
+7. Verifies the consumer's block count matches the source data using `db-analyser`
 
 ### Configuration
 
@@ -60,7 +62,9 @@ These configuration parameters can be overridden via environment variables.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DB_DIR` | `./test-data/source-db` | Path to the source chain database |
-| `SYNC_TIMEOUT` | `120` | Seconds to wait for the consumer to sync |
+| `SYNC_TIMEOUT` | `120` | Seconds to wait for the accelerator cache to fill |
+| `MIN_CHUNKS` | `10` | Number of chunk triplets to serve from CDN (subset of source) |
+| `GSA` | `genesis-sync-accelerator` | Path to the accelerator binary (useful for testing a cabal-built binary) |
 
 ### Network Ports
 
@@ -71,6 +75,13 @@ The test uses the following ports:
 | CDN (python3 http.server) | 18080 |
 | Accelerator | 13001 |
 | Consumer cardano-node | 13100 |
+
+### PeerSharing
+
+`config.json` sets `"PeerSharing": false`. This is required for the consumer to
+enter `LocalRootsOnly` association mode, which makes the accelerator a trusted
+local root peer. Without this, the consumer's GSM stays in `PreSyncing` and
+BlockFetch never activates — the consumer never actually fetches blocks.
 
 ### Cleanup
 
