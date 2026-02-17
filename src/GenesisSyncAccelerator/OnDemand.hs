@@ -157,6 +157,7 @@ decorateImmutableDB cfg@OnDemandConfig{odcChunkInfo} db = do
                   stateVar
                   component
                   from
+                  to
                   requestedChunks
       }
 
@@ -176,9 +177,10 @@ mkOnDemandIterator ::
   StrictTVar m OnDemandState ->
   BlockComponent blk b ->
   StreamFrom blk ->
+  StreamTo blk ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from chunks = do
+mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from to chunks = do
   varChunks <- newTVarIO chunks
   varCurrentIt <- newTVarIO Nothing
 
@@ -212,9 +214,10 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
                   odcCheckIntegrity
                   component
                   from
+                  to
                   [c]
               case result of
-                Left _ -> return IteratorExhausted
+                Left ex -> trace ("mkRawChunkIterator failed for chunk " ++ show c ++ ": " ++ show ex) $ return IteratorExhausted
                 Right it -> do
                   atomically $ writeTVar varCurrentIt (Just it)
                   next -- Transition to next chunk
@@ -324,10 +327,12 @@ mkRawChunkIterator ::
   BlockComponent blk b ->
   -- | Stream lower bound: entries at or before this point are excluded.
   StreamFrom blk ->
+  -- | Stream upper bound: entries after this point are excluded.
+  StreamTo blk ->
   -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from chunks = do
+mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
@@ -341,7 +346,9 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from chu
     entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
     return $ map (chunk,) entries
 
-  let flatEntries = applyStreamFrom chunkInfo from (concat allEntries)
+  let flatEntries = applyStreamTo chunkInfo to
+                  . applyStreamFrom chunkInfo from
+                  $ concat allEntries
   varEntries <- newTVarIO flatEntries
 
   -- 2. Define the 'iteratorNext' action.
@@ -409,3 +416,18 @@ applyStreamFrom ci = \case
     dropWhile $ \(_, WithBlockSize _ e) ->
       let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
        in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
+
+-- | Filter entries to honour the 'StreamTo' upper bound.
+--
+-- For 'StreamToInclusive pt', takes entries up to and including @pt@.
+-- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
+-- so a simple 'takeWhile' from the front suffices, with a final check for the
+-- exact matching entry.
+applyStreamTo ::
+  ChunkInfo ->
+  StreamTo blk ->
+  [(ChunkNo, WithBlockSize (Entry blk))] ->
+  [(ChunkNo, WithBlockSize (Entry blk))]
+applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
+  takeWhile $ \(_, WithBlockSize _ e) ->
+    ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
