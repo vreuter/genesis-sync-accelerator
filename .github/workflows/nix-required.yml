@@ -1,0 +1,18 @@
+name: nix-required
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  hydra-required:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Build required native job
+        run: nix build .#hydraJobs.x86_64-linux.required.native --print-build-logs
