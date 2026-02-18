@@ -74,12 +74,12 @@ library
   import: common-all
   hs-source-dirs: src
   exposed-modules:
+    GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.RemoteStorage
 
   other-modules:
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
-    GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.Parsers
     GenesisSyncAccelerator.Types
 
@@ -106,10 +106,22 @@ library
     resource-registry,
     text,
 
-test-suite all-tests
-  import: common-all
+library gsa-testlib
+  hs-source-dirs: src/gsa-testlib
+  exposed-modules:
+    Test.GenesisSyncAccelerator.Orphans
+    Test.GenesisSyncAccelerator.Utilities
+
+  build-depends:
+    QuickCheck,
+    base,
+    genesis-sync-accelerator,
+    ouroboros-consensus,
+    text,
+
+test-suite storage-tests
   main-is: Main.hs
-  hs-source-dirs: test
+  hs-source-dirs: test/storage
   type: exitcode-stdio-1.0
   ghc-options:
     -threaded
@@ -118,12 +130,47 @@ test-suite all-tests
   build-depends:
     QuickCheck,
     base,
+    directory,
+    filepath,
     fs-api,
     genesis-sync-accelerator,
+    genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
     tasty,
     tasty-quickcheck,
+    temporary,
     text,
 
   other-modules:
     Test.GenesisSyncAccelerator.Storage
+
+test-suite download-tests
+  main-is: Main.hs
+  hs-source-dirs: test/download
+  type: exitcode-stdio-1.0
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    QuickCheck,
+    base,
+    bytestring,
+    containers,
+    contra-tracer,
+    directory,
+    filepath,
+    genesis-sync-accelerator,
+    genesis-sync-accelerator:gsa-testlib,
+    ouroboros-consensus,
+    quickcheck-instances,
+    tasty,
+    tasty-quickcheck,
+    temporary,
+    text,
+    wai,
+    wai-app-static,
+    warp,
+
+  other-modules:
+    Test.GenesisSyncAccelerator.Download

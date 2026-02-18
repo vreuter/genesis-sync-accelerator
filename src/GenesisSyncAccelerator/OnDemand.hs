@@ -18,6 +18,7 @@
 -- reads directly from the downloaded chunk files.
 module GenesisSyncAccelerator.OnDemand
   ( decorateImmutableDB
+  , deleteChunkFiles
   , OnDemandConfig (..)
   ) where
 
