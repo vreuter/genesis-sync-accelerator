@@ -1,13 +1,7 @@
-{
-  inputs,
-  pkgs,
-  hsPkgs,
-}:
+{ inputs, pkgs, hsPkgs, }:
 
-let
-  inherit (pkgs) lib;
-in
-hsPkgs.shellFor {
+let inherit (pkgs) lib;
+in hsPkgs.shellFor {
   nativeBuildInputs = [
     pkgs.cabal
     pkgs.fd
@@ -37,10 +31,10 @@ hsPkgs.shellFor {
 
   shellHook = ''
     export LANG="en_US.UTF-8"
-  ''
-  + lib.optionalString (pkgs.glibcLocales != null && pkgs.stdenv.hostPlatform.libc == "glibc") ''
-    export LOCALE_ARCHIVE="${pkgs.glibcLocales}/lib/locale/locale-archive"
-  '';
+  '' + lib.optionalString
+    (pkgs.glibcLocales != null && pkgs.stdenv.hostPlatform.libc == "glibc") ''
+      export LOCALE_ARCHIVE="${pkgs.glibcLocales}/lib/locale/locale-archive"
+    '';
 
   withHoogle = true;
 }
