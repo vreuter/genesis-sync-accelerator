@@ -27,7 +27,6 @@ MIN_CHUNKS="${MIN_CHUNKS:-20}"
 MAX_CACHED_CHUNKS=25
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
 CONFIG="$SCRIPT_DIR/config/config.json"
-CONSUMER_CONFIG="$SCRIPT_DIR/config/consumer-config.json"
 GSA="${GSA:-genesis-sync-accelerator}"
 # Experiments: set these env vars to toggle behaviour.
 #   CONSENSUS_MODE=PraosMode  — override GenesisMode (disables historicity check)
@@ -59,7 +58,7 @@ trap cleanup EXIT
 
 echo "${BOLD}=== Ensuring source data ===${NC}"
 
-DB_DIR="$SOURCE_DB" bash "$SCRIPT_DIR/chain-init.sh"
+MIN_CHUNKS="$MIN_CHUNKS" DB_DIR="$SOURCE_DB" bash "$SCRIPT_DIR/chain-init.sh"
 
 IMMUTABLE_SRC="$SOURCE_DB/immutable"
 echo "  Source has $(find "$IMMUTABLE_SRC" -name '*.chunk' | wc -l) chunk(s)"
@@ -107,15 +106,13 @@ echo "  Expected ImmutableDB blocks (total - k): $EXPECTED_IMMUTABLE"
 
 if [[ -n "$CONSENSUS_MODE" ]]; then
   echo "  ${BOLD}Experiment:${NC} overriding ConsensusMode → $CONSENSUS_MODE"
-  # Patch consumer config in the ephemeral workdir so we don't modify the repo copy.
-  # Copy genesis files too, since the config references them via relative paths.
-  PATCHED_CONSUMER_CONFIG="$TMPDIR/consumer-config.json"
+  PATCHED_CONFIG="$TMPDIR/config.json"
   sed "s/\"ConsensusMode\": \"[^\"]*\"/\"ConsensusMode\": \"$CONSENSUS_MODE\"/" \
-    "$CONSUMER_CONFIG" > "$PATCHED_CONSUMER_CONFIG"
+    "$CONFIG" > "$PATCHED_CONFIG"
   for f in byron-genesis.json shelley-genesis.json alonzo-genesis.json conway-genesis.json; do
     cp "$SCRIPT_DIR/config/$f" "$TMPDIR/$f"
   done
-  CONSUMER_CONFIG="$PATCHED_CONSUMER_CONFIG"
+  CONFIG="$PATCHED_CONFIG"
 fi
 
 # ── Start CDN ────────────────────────────────────────────────────────────────
@@ -163,24 +160,23 @@ PIDS+=($ACCEL_PID)
 
 wait_for_port "$ACCEL_PORT" 15 "Accelerator"
 
-# ── Download peer snapshot ────────────────────────────────────────────────────
-
-echo ""
-echo "${BOLD}=== Downloading peer snapshot ===${NC}"
-
-PEER_SNAPSHOT_URL="https://book.play.dev.cardano.org/environments/preprod/peer-snapshot.json"
-curl -sSfL "$PEER_SNAPSHOT_URL" -o "$SCRIPT_DIR/config/peer-snapshot.json"
-echo "  Downloaded peer-snapshot.json"
-
 # ── Start consumer ────────────────────────────────────────────────────────────
 
 echo ""
 echo "${BOLD}=== Starting consumer ===${NC}"
 
+CONSUMER_TOPOLOGY="$TMPDIR/consumer-topology.json"
+jq --arg snap "$SCRIPT_DIR/config/peer-snapshot.json" \
+   --argjson port "$ACCEL_PORT" \
+   '.localRoots[0].accessPoints = [{"address": "127.0.0.1", "port": $port}]
+   | .localRoots[0].trustable = true
+   | .peerSnapshotFile = $snap' \
+   "$SCRIPT_DIR/config/topology.json" > "$CONSUMER_TOPOLOGY"
+
 stdbuf -oL cardano-node run \
-  --config "$CONSUMER_CONFIG" \
+  --config "$CONFIG" \
   --database-path "$CONSUMER_DB" \
-  --topology "$SCRIPT_DIR/config/consumer-topology.json" \
+  --topology "$CONSUMER_TOPOLOGY" \
   --port "$CONSUMER_PORT" \
   --socket-path "$TMPDIR/node.sock" \
   >"$TMPDIR/node.log" 2>&1 &

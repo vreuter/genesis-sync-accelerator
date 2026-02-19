@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
-MIN_CHUNKS="${MIN_CHUNKS:-10}"
+MIN_CHUNKS="${MIN_CHUNKS:-20}"
 TIMEOUT=600
 DB_DIR="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
 NODE_PORT=13713
@@ -14,6 +14,10 @@ TOPOLOGY="$SCRIPT_DIR/config/topology.json"
 IMMUTABLE_DIR="$DB_DIR/immutable"
 
 command -v cardano-node >/dev/null || { echo "${RED}cardano-node not found.${NC} Run: nix develop .#integration-test"; exit 1; }
+
+# Always download peer-snapshot (needed for GenesisMode topology, and by run-test.sh).
+PEER_SNAPSHOT_URL="https://book.play.dev.cardano.org/environments/preprod/peer-snapshot.json"
+curl -sSfL "$PEER_SNAPSHOT_URL" -o "$SCRIPT_DIR/config/peer-snapshot.json"
 
 # Skip if already synced.
 if [[ -d "$IMMUTABLE_DIR" ]]; then
