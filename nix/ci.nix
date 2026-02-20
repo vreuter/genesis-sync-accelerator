@@ -39,9 +39,12 @@ let
     };
   });
 
+  stripDevShells =
+    lib.filterAttrsRecursive (n: _: n != "devShell" && n != "devShellProfiled");
+
   require = jobs:
     pkgs.releaseTools.aggregate {
       name = "required-genesis-sync-accelerator";
-      constituents = lib.collect lib.isDerivation jobs;
+      constituents = lib.collect lib.isDerivation (stripDevShells jobs);
     };
 in jobs // { required = lib.mapAttrs (_: require) jobs; }
