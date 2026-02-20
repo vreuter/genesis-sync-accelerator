@@ -1,8 +1,11 @@
 {
   nixConfig = {
-    extra-substituters = [ "https://cache.iog.io" ];
-    extra-trusted-public-keys =
-      [ "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=" ];
+    extra-substituters =
+      [ "https://cache.iog.io" "https://genesis-sync-accelerator.cachix.org" ];
+    extra-trusted-public-keys = [
+      "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ="
+      "genesis-sync-accelerator.cachix.org-1:/usH0+ZtxuHMWbx5teUFACvRZV1+LdBtjwoYruy4OGY="
+    ];
     allow-import-from-derivation = true;
   };
   inputs = {
