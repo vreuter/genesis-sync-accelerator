@@ -15,7 +15,7 @@ let
     };
   hsPkgs = haskell-nix.cabalProject {
     src = ./..;
-    compiler-nix-name = "ghc9102";
+    compiler-nix-name = "ghc967";
     inputMap = { "https://chap.intersectmbo.org/" = inputs.CHaP; };
     modules =
       [ (forAllProjectPackages ({ ... }: { ghcOptions = [ "-Werror" ]; })) ];
