@@ -27,7 +27,6 @@ import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (delete)
 import Data.Proxy (Proxy (..))
-import Data.Typeable (Typeable)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
@@ -56,10 +55,9 @@ import Ouroboros.Consensus.Storage.ImmutableDB.API
   , getTipPoint
   )
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo, ChunkNo (..))
-import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal as ChunkInfo
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
-import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Primary as Primary
+import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary as Secondary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Iterator (extractBlockComponent)
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Types (WithBlockSize (..))
@@ -124,7 +122,6 @@ decorateImmutableDB ::
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
-  , Typeable blk
   ) =>
   OnDemandConfig m blk h ->
   ImmutableDB m blk ->
@@ -171,7 +168,6 @@ mkOnDemandIterator ::
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
-  , Typeable blk
   ) =>
   OnDemandConfig m blk h ->
   StrictTVar m OnDemandState ->
@@ -206,18 +202,19 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
               -- A failed download (e.g. 404) means we've reached the end
               -- of data available on the CDN.
               ensureChunks cfg stateVar [c]
-              result <- try @_ @SomeException $
-                mkRawChunkIterator
-                  odcHasFS
-                  odcChunkInfo
-                  odcCodecConfig
-                  odcCheckIntegrity
-                  component
-                  from
-                  to
-                  [c]
+              result <-
+                try @_ @SomeException $
+                  mkRawChunkIterator
+                    odcHasFS
+                    odcChunkInfo
+                    odcCodecConfig
+                    odcCheckIntegrity
+                    component
+                    from
+                    to
+                    [c]
               case result of
-                Left ex -> trace ("mkRawChunkIterator failed for chunk " ++ show c ++ ": " ++ show ex) $ return IteratorExhausted
+                Left _ex -> return IteratorExhausted
                 Right it -> do
                   atomically $ writeTVar varCurrentIt (Just it)
                   next -- Transition to next chunk
@@ -316,7 +313,6 @@ mkRawChunkIterator ::
   , DecodeDiskDep (NestedCtxt Header) blk
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
-  , Typeable blk
   ) =>
   HasFS m h ->
   ChunkInfo ->
@@ -340,15 +336,14 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
     -- Determine per-chunk whether the first entry is an EBB by reading
     -- the primary index, rather than assuming all chunks start with EBBs.
     mFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
-    let firstIsEBB = case mFirstSlot of
-          Nothing   -> IsNotEBB
-          Just slot -> ChunkLayout.relativeSlotIsEBB slot
+    let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mFirstSlot
     entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
     return $ map (chunk,) entries
 
-  let flatEntries = applyStreamTo chunkInfo to
-                  . applyStreamFrom chunkInfo from
-                  $ concat allEntries
+  let flatEntries =
+        applyStreamTo chunkInfo to
+          . applyStreamFrom chunkInfo from
+          $ concat allEntries
   varEntries <- newTVarIO flatEntries
 
   -- 2. Define the 'iteratorNext' action.
