@@ -20,9 +20,9 @@ source "$SCRIPT_DIR/lib.sh"
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-CDN_PORT=18080
-ACCEL_PORT=13001
-CONSUMER_PORT=13100
+CDN_PORT="${CDN_PORT:-3000}"
+ACCEL_PORT="${ACCEL_PORT:-3002}"
+CONSUMER_PORT="${CONSUMER_PORT:-3001}"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 MAX_CACHED_CHUNKS=25
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"

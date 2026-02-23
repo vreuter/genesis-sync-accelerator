@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 TIMEOUT=600
 DB_DIR="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
-NODE_PORT=13713
+NODE_PORT="${NODE_PORT:-3001}"
 CONFIG="$SCRIPT_DIR/config/config.json"
 TOPOLOGY="$SCRIPT_DIR/config/topology.json"
 IMMUTABLE_DIR="$DB_DIR/immutable"
