@@ -25,6 +25,8 @@ ACCEL_PORT="${ACCEL_PORT:-3002}"
 CONSUMER_PORT="${CONSUMER_PORT:-3001}"
 MIN_CHUNKS="${MIN_CHUNKS:-20}"
 MAX_CACHED_CHUNKS=25
+POLL_INTERVAL=5
+LOG_TAIL_LINES=50
 SOURCE_DB="${DB_DIR:-$SCRIPT_DIR/test-data/source-db}"
 CONFIG="$SCRIPT_DIR/config/config.json"
 GSA="${GSA:-genesis-sync-accelerator}"
@@ -224,14 +226,14 @@ while (( ELAPSED < CONSUMER_TIMEOUT )); do
     exit 1
   fi
 
-  sleep 5
-  ELAPSED=$((ELAPSED + 5))
+  sleep "$POLL_INTERVAL"
+  ELAPSED=$((ELAPSED + POLL_INTERVAL))
 done
 
 if (( ELAPSED >= CONSUMER_TIMEOUT )); then
   echo "  ${RED}Timeout after ${CONSUMER_TIMEOUT}s (${CONSUMER_BLOCKS}/${EXPECTED_IMMUTABLE} blocks)${NC}"
   echo "--- consumer log (last 50 lines) ---"
-  tail -50 "$TMPDIR/node.log" 2>/dev/null || true
+  tail -"$LOG_TAIL_LINES" "$TMPDIR/node.log" 2>/dev/null || true
   exit 1
 fi
 
@@ -265,7 +267,7 @@ else
   echo "--- db-analyser output ---"
   echo "$DB_ANALYSER_OUT"
   echo "--- consumer log (last 50 lines) ---"
-  tail -50 "$TMPDIR/node.log" 2>/dev/null || true
+  tail -"$LOG_TAIL_LINES" "$TMPDIR/node.log" 2>/dev/null || true
   exit 1
 fi
 
@@ -318,11 +320,11 @@ fi
 if [[ "$PHASE3_OK" != "true" ]]; then
   echo ""
   echo "--- accelerator log (last 50 lines) ---"
-  tail -50 "$TMPDIR/accelerator.log" 2>/dev/null || true
+  tail -"$LOG_TAIL_LINES" "$TMPDIR/accelerator.log" 2>/dev/null || true
   echo "--- consumer log (last 50 lines) ---"
-  tail -50 "$TMPDIR/node.log" 2>/dev/null || true
+  tail -"$LOG_TAIL_LINES" "$TMPDIR/node.log" 2>/dev/null || true
   echo "--- CDN log (last 20 lines) ---"
-  tail -20 "$TMPDIR/cdn.log" 2>/dev/null || true
+  tail -"$LOG_TAIL_LINES" "$TMPDIR/cdn.log" 2>/dev/null || true
   exit 1
 fi
 
