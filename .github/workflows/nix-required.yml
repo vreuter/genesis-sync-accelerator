@@ -22,5 +22,7 @@ jobs:
         with:
           name: genesis-sync-accelerator
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Build required formatting and lintingjob
+        run: nix build .#hydraJobs.x86_64-linux.required.formattingLinting --print-build-logs
       - name: Build required native job
         run: nix build .#hydraJobs.x86_64-linux.required.native --print-build-logs

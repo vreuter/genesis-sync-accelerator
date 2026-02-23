@@ -32,11 +32,8 @@ let
     };
 
   jobs = lib.filterAttrsRecursive (n: v: n != "recurseForDerivations") ({
-    native = {
-      haskell = mkHaskellJobsFor pkgs.hsPkgs;
-    } // lib.optionalAttrs (buildSystem == "x86_64-linux") {
-      formattingLinting = import ./formatting-linting.nix pkgs;
-    };
+    native = { haskell = mkHaskellJobsFor pkgs.hsPkgs; };
+    formattingLinting = import ./formatting-linting.nix pkgs;
   });
 
   stripDevShells =
