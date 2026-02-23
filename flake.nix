@@ -1,10 +1,10 @@
 {
   nixConfig = {
-    extra-substituters = [
-      "https://cache.iog.io"
-    ];
+    extra-substituters =
+      [ "https://cache.iog.io" "https://genesis-sync-accelerator.cachix.org" ];
     extra-trusted-public-keys = [
       "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ="
+      "genesis-sync-accelerator.cachix.org-1:/usH0+ZtxuHMWbx5teUFACvRZV1+LdBtjwoYruy4OGY="
     ];
     allow-import-from-derivation = true;
   };
@@ -32,8 +32,7 @@
       flake = false;
     };
   };
-  outputs =
-    inputs:
+  outputs = inputs:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -41,9 +40,7 @@
         #"aarch64-linux"
         "aarch64-darwin"
       ];
-    in
-    inputs.flake-utils.lib.eachSystem supportedSystems (
-      system:
+    in inputs.flake-utils.lib.eachSystem supportedSystems (system:
       let
         pkgs = import inputs.nixpkgs {
           inherit system;
@@ -58,22 +55,16 @@
           ];
         };
         hydraJobs = import ./nix/ci.nix { inherit inputs pkgs; };
-      in
-      {
+      in {
         devShells = rec {
-          default = ghc96;
-          ghc96 = hydraJobs.native.haskell96.devShell;
-          ghc96-profiled = hydraJobs.native.haskell96.devShellProfiled;
-          ghc910 = hydraJobs.native.haskell910.devShell;
-          ghc910-profiled = hydraJobs.native.haskell910.devShellProfiled;
-          ghc912 = hydraJobs.native.haskell912.devShell;
-          ghc912-profiled = hydraJobs.native.haskell912.devShellProfiled;
+          default = haskell;
+          haskell = hydraJobs.native.haskell.devShell;
+          haskell-profiled = hydraJobs.native.haskell.devShellProfiled;
         };
         inherit hydraJobs;
         legacyPackages = pkgs;
-        packages = hydraJobs.native.haskell96 // {
-          default = hydraJobs.native.haskell96.exes.genesis-sync-accelerator;
+        packages = hydraJobs.native.haskell // {
+          default = hydraJobs.native.haskell.exes.genesis-sync-accelerator;
         };
-      }
-    );
+      });
 }
