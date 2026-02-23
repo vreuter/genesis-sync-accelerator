@@ -9,10 +9,11 @@ Running this test requires a few tools to be in PATH including:
 - `python3`
 - `curl`
 - `jq`
+- `ss`
 
-And of course `genesis-sync-accelerator`, among others. To satisfy these
-requirements, enter the `integration-test` nix shell. From the root of
-the repository:
+And of course `genesis-sync-accelerator`. To satisfy these
+requirements, you may enter the `integration-test` nix shell.
+From the root of the repository:
 
 ```bash
 nix develop .#integration-test
