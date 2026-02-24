@@ -173,6 +173,7 @@ jq --arg snap "$SCRIPT_DIR/config/peer-snapshot.json" \
    --argjson port "$ACCEL_PORT" \
    '.localRoots[0].accessPoints = [{"address": "127.0.0.1", "port": $port}]
    | .localRoots[0].trustable = true
+   | .localRoots[0].valency = 1
    | .peerSnapshotFile = $snap' \
    "$SCRIPT_DIR/config/topology.json" > "$CONSUMER_TOPOLOGY"
 
@@ -287,7 +288,7 @@ echo "${BOLD}=== Phase 3: Validate accelerator participation ===${NC}"
 PHASE3_OK=true
 
 # 3a. CDN downloads happened — count HTTP 200 responses in CDN log.
-CDN_DOWNLOADS=$(grep -c '"GET .* HTTP/.*" 200' "$TMPDIR/cdn.log" 2>/dev/null || echo "0")
+CDN_DOWNLOADS=$(grep -c '"GET .* HTTP/.*" 200' "$TMPDIR/cdn.log" 2>/dev/null) || CDN_DOWNLOADS=0
 echo "  CDN HTTP 200 responses: ${CDN_DOWNLOADS}"
 if (( CDN_DOWNLOADS > 0 )); then
   echo "  ${GREEN}OK${NC}: Accelerator downloaded data from CDN"
@@ -297,7 +298,7 @@ else
 fi
 
 # 3b. Accelerator served ChainSync data.
-CHAINSYNC_MSGS=$(grep -cE 'MsgRollForward|MsgIntersectFound' "$TMPDIR/accelerator.log" 2>/dev/null || echo "0")
+CHAINSYNC_MSGS=$(grep -cE 'MsgRollForward|MsgIntersectFound' "$TMPDIR/accelerator.log" 2>/dev/null) || CHAINSYNC_MSGS=0
 echo "  Accelerator ChainSync messages: ${CHAINSYNC_MSGS}"
 if (( CHAINSYNC_MSGS > 0 )); then
   echo "  ${GREEN}OK${NC}: Accelerator served ChainSync data"
@@ -308,7 +309,7 @@ fi
 
 # 3c. BlockFetch from accelerator — grep consumer log for CompletedBlockFetch
 #     with the accelerator's address (127.0.0.1).
-BLOCKFETCH_FROM_ACCEL=$(grep -c 'CompletedBlockFetch.*127\.0\.0\.1' "$TMPDIR/node.log" 2>/dev/null || echo "0")
+BLOCKFETCH_FROM_ACCEL=$(grep -c 'CompletedBlockFetch.*127\.0\.0\.1' "$TMPDIR/node.log" 2>/dev/null) || BLOCKFETCH_FROM_ACCEL=0
 echo "  BlockFetch completions from accelerator (127.0.0.1): ${BLOCKFETCH_FROM_ACCEL}"
 if (( BLOCKFETCH_FROM_ACCEL > 0 )); then
   echo "  ${GREEN}OK${NC}: Blocks were fetched from the accelerator"
