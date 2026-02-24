@@ -121,7 +121,6 @@ test-suite all-tests
     fs-api,
     genesis-sync-accelerator,
     ouroboros-consensus,
-    quickcheck-instances,
     tasty,
     tasty-quickcheck,
     text,

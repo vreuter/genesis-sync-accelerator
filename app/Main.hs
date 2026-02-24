@@ -18,10 +18,12 @@ import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
 import Options.Applicative
 import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
+import System.IO (BufferMode (..), hSetBuffering, stdout)
 import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
 main :: IO ()
 main = withStdTerminalHandles $ do
+  hSetBuffering stdout LineBuffering
   cryptoInit
   Opts
     { immDBDir

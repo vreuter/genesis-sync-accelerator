@@ -60,6 +60,18 @@
           default = haskell;
           haskell = hydraJobs.native.haskell.devShell;
           haskell-profiled = hydraJobs.native.haskell.devShellProfiled;
+
+          integration-test = pkgs.mkShell {
+            packages = [
+              pkgs.hsPkgs.hsPkgs.genesis-sync-accelerator.components.exes.genesis-sync-accelerator
+              pkgs.hsPkgs.hsPkgs.cardano-node.components.exes.cardano-node
+              pkgs.hsPkgs.hsPkgs.ouroboros-consensus-cardano.components.exes.db-analyser
+              pkgs.python3
+              pkgs.curl
+              pkgs.jq
+              pkgs.iproute2
+            ];
+          };
         };
         inherit hydraJobs;
         legacyPackages = pkgs;

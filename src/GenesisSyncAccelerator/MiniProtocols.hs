@@ -176,7 +176,7 @@ genesisSyncAccelerator chainSyncMessageTracer chainSyncEventTracer codecCfg encA
               . blockFetchServer immDB ChainDB.getSerialisedBlockWithPoint
       txSubmissionProt =
         -- never reply, there is no timeout
-        MiniProtocolCb $ \_ctx _channel -> forever $ threadDelay 10
+        MiniProtocolCb $ \_ctx _channel -> sleepForever
 
     mkMiniProtocol miniProtocolStart miniProtocolNum limits proto =
       MiniProtocol
@@ -214,22 +214,29 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
       newTVarIO =<< ImmutableDB.streamAll immDB registry blockComponent
     varIntersection <-
       newTVarIO $ JustNegotiatedIntersection GenesisPoint
+    let getNextBlock = do
+          iterator <- readTVarIO varIterator
+          ImmutableDB.iteratorNext iterator >>= \case
+            ImmutableDB.IteratorExhausted -> return Nothing
+            ImmutableDB.IteratorResult a -> return (Just a)
 
-    let followerInstructionBlocking =
+        followerInstructionBlocking =
           readTVarIO varIntersection >>= \case
             JustNegotiatedIntersection intersectionPt -> do
               atomically $
                 writeTVar varIntersection AlreadySentRollbackToIntersection
               pure $ RollBack intersectionPt
-            -- Otherwise, get the next block from the iterator (or fail).
-            AlreadySentRollbackToIntersection -> do
-              iterator <- readTVarIO varIterator
-              ImmutableDB.iteratorNext iterator >>= \case
-                ImmutableDB.IteratorExhausted -> do
-                  ImmutableDB.iteratorClose iterator
-                  throwIO ReachedImmutableTip
-                ImmutableDB.IteratorResult a ->
-                  pure $ AddBlock a
+            AlreadySentRollbackToIntersection ->
+              getNextBlock >>= maybe sleepForever (pure . AddBlock)
+
+        followerInstructionNonBlocking =
+          readTVarIO varIntersection >>= \case
+            JustNegotiatedIntersection intersectionPt -> do
+              atomically $
+                writeTVar varIntersection AlreadySentRollbackToIntersection
+              pure $ Just $ RollBack intersectionPt
+            AlreadySentRollbackToIntersection ->
+              fmap AddBlock <$> getNextBlock
 
         followerClose = ImmutableDB.iteratorClose =<< readTVarIO varIterator
 
@@ -246,7 +253,7 @@ chainSyncServer tr immDB blockComponent registry = ChainSyncServer $ do
 
     pure
       Follower
-        { followerInstruction = Just <$> followerInstructionBlocking
+        { followerInstruction = followerInstructionNonBlocking
         , followerInstructionBlocking
         , followerForward
         , followerClose
@@ -283,6 +290,9 @@ blockFetchServer immDB blockComponent registry =
             ImmutableDB.IteratorExhausted -> ChainDB.IteratorExhausted
       , ChainDB.iteratorClose = ImmutableDB.iteratorClose iterator
       }
+
+sleepForever :: IOLike m => m a
+sleepForever = forever $ threadDelay 10
 
 data ImmDBServerException
   = ReachedImmutableTip

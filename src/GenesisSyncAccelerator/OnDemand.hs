@@ -36,8 +36,10 @@ import Ouroboros.Consensus.Block
   , ConvertRawHash (..)
   , HasHeader
   , Header
+  , HeaderHash
   , IsEBB (..)
   , NestedCtxt
+  , Point (BlockPoint, GenesisPoint)
   , RealPoint (..)
   , WithOrigin (..)
   , pointSlot
@@ -53,8 +55,8 @@ import Ouroboros.Consensus.Storage.ImmutableDB.API
   , getTipPoint
   )
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo, ChunkNo (..))
-import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal as ChunkInfo
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
+import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Primary as Primary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary as Secondary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Iterator (extractBlockComponent)
@@ -151,6 +153,8 @@ decorateImmutableDB cfg@OnDemandConfig{odcChunkInfo} db = do
                   cfg
                   stateVar
                   component
+                  from
+                  to
                   requestedChunks
       }
 
@@ -168,9 +172,11 @@ mkOnDemandIterator ::
   OnDemandConfig m blk h ->
   StrictTVar m OnDemandState ->
   BlockComponent blk b ->
+  StreamFrom blk ->
+  StreamTo blk ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component chunks = do
+mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from to chunks = do
   varChunks <- newTVarIO chunks
   varCurrentIt <- newTVarIO Nothing
 
@@ -192,18 +198,25 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
             [] -> return IteratorExhausted
             (c : rest) -> do
               atomically $ writeTVar varChunks rest
-              -- Download only the current chunk before serving it
-              ensureChunks cfg stateVar [c]
-              it <-
-                mkRawChunkIterator
-                  odcHasFS
-                  odcChunkInfo
-                  odcCodecConfig
-                  odcCheckIntegrity
-                  component
-                  [c]
-              atomically $ writeTVar varCurrentIt (Just it)
-              next -- Transition to next chunk
+              -- Download only the current chunk before serving it.
+              -- A failed download (e.g. 404) means we've reached the end
+              -- of data available on the CDN.
+              ok <- ensureChunks cfg stateVar [c]
+              if not ok
+                then return IteratorExhausted
+                else do
+                  it <-
+                    mkRawChunkIterator
+                      odcHasFS
+                      odcChunkInfo
+                      odcCodecConfig
+                      odcCheckIntegrity
+                      component
+                      from
+                      to
+                      [c]
+                  atomically $ writeTVar varCurrentIt (Just it)
+                  next -- Transition to next chunk
     hasNext =
       readTVar varCurrentIt >>= \case
         Just it -> iteratorHasNext it
@@ -224,34 +237,41 @@ ensureChunks ::
   OnDemandConfig m blk h ->
   StrictTVar m OnDemandState ->
   [ChunkNo] ->
-  m ()
+  m Bool
 ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} stateVar requestedChunks = do
   -- 1. Identify and download missing chunks
   state <- readTVarIO stateVar
-  let missingChunks = filter (\c -> not (Set.member c (odsCachedChunks state))) requestedChunks
+  let missingChunks = filter (`Set.notMember` odsCachedChunks state) requestedChunks
 
-  unless (null missingChunks) $ do
-    liftIO $ mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
+  downloadResult <-
+    liftIO $
+      try @_ @Remote.DownloadFailed $
+        mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
 
-  -- 2. Update usage order and identify chunks to prune
-  toPrune <- atomically $ do
-    curr <- readTVar stateVar
-    let
-      -- Move requested chunks to the head (most recently used)
-      newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
-      newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
+  case downloadResult of
+    Left _ex -> return False
+    Right () -> do
+      -- 2. Update usage order and identify chunks to prune
+      toPrune <- atomically $ do
+        curr <- readTVar stateVar
+        let
+          -- Move requested chunks to the head (most recently used)
+          newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
+          newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
 
-      -- Eviction: if we exceed the limit, prune the least recently used chunks.
-      -- We must keep all chunks currently requested to ensure iterator safety.
-      (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
-      updatedCached = Set.difference newCached (Set.fromList prune)
+          -- Eviction: if we exceed the limit, prune the least recently used chunks.
+          -- We must keep all chunks currently requested to ensure iterator safety.
+          (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
+          updatedCached = Set.difference newCached (Set.fromList prune)
 
-    writeTVar stateVar (OnDemandState updatedCached stay)
-    return prune
+        writeTVar stateVar (OnDemandState updatedCached stay)
+        return prune
 
-  -- 3. Physically delete pruned chunks from disk
-  unless (null toPrune) $
-    mapM_ (deleteChunkFiles odcHasFS) toPrune
+      -- 3. Physically delete pruned chunks from disk
+      unless (null toPrune) $
+        mapM_ (deleteChunkFiles odcHasFS) toPrune
+
+      return True
 
 -- | Deletes the triad of files associated with a chunk.
 deleteChunkFiles :: IOLike m => HasFS m h -> ChunkNo -> m ()
@@ -307,20 +327,30 @@ mkRawChunkIterator ::
   (blk -> Bool) ->
   -- | The component of the block to stream (e.g., the whole block, just the header, etc.).
   BlockComponent blk b ->
+  -- | Stream lower bound: entries at or after this point are stremed.
+  -- Note that inclusivity depends on the constructor being used (StreamFromInclusive vs StreamFromExclusive).
+  StreamFrom blk ->
+  -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
+  StreamTo blk ->
   -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks = do
+mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
     chunkSize <- withFile hasFS (fsPathChunkFile chunk) ReadMode (hGetSize hasFS)
-    -- We assume the first block might be an EBB if the chunk supports it.
-    let firstIsEBB = if ChunkInfo.chunkInfoSupportsEBBs chunkInfo then IsEBB else IsNotEBB
+    -- Determine per-chunk whether the first entry is an EBB by reading
+    -- the primary index, rather than assuming all chunks start with EBBs.
+    mbFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
+    let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
     entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
     return $ map (chunk,) entries
 
-  let flatEntries = concat allEntries
+  let flatEntries =
+        applyStreamTo chunkInfo to
+          . applyStreamFrom chunkInfo from
+          $ concat allEntries
   varEntries <- newTVarIO flatEntries
 
   -- 2. Define the 'iteratorNext' action.
@@ -365,3 +395,41 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks =
 tipToRealPoint :: ChunkInfo -> Entry blk -> RealPoint blk
 tipToRealPoint ci Secondary.Entry{blockOrEBB, headerHash} =
   RealPoint (ChunkLayout.slotNoOfBlockOrEBB ci blockOrEBB) headerHash
+
+-- | Filter entries to honour the 'StreamFrom' lower bound.
+--
+-- For 'StreamFromExclusive pt', drops entries at or before @pt@.
+-- For 'StreamFromInclusive pt', drops entries strictly before @pt@.
+-- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
+-- so a simple 'dropWhile' from the front suffices.
+applyStreamFrom ::
+  Eq (HeaderHash blk) =>
+  ChunkInfo ->
+  StreamFrom blk ->
+  [(ChunkNo, WithBlockSize (Entry blk))] ->
+  [(ChunkNo, WithBlockSize (Entry blk))]
+applyStreamFrom ci = \case
+  StreamFromExclusive GenesisPoint -> id
+  StreamFromExclusive (BlockPoint fromSlot fromHash) ->
+    dropWhile $ \(_, WithBlockSize _ e) ->
+      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
+       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e == fromHash)
+  StreamFromInclusive (RealPoint fromSlot fromHash) ->
+    dropWhile $ \(_, WithBlockSize _ e) ->
+      let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
+       in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
+
+-- | Filter entries to honour the 'StreamTo' upper bound.
+--
+-- For 'StreamToInclusive pt', takes entries up to and including @pt@.
+-- Entries within a chunk are ordered (EBB first, then regular blocks by slot),
+-- so a simple 'takeWhile' from the front suffices, with a final check for the
+-- exact matching entry.
+applyStreamTo ::
+  ChunkInfo ->
+  StreamTo blk ->
+  [(ChunkNo, WithBlockSize (Entry blk))] ->
+  [(ChunkNo, WithBlockSize (Entry blk))]
+applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
+  takeWhile $ \(_, WithBlockSize _ e) ->
+    ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot

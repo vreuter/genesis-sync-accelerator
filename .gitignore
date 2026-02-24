@@ -28,6 +28,7 @@ dist/
 **/TAGS
 
 # nix
+.direnv/
 result
 result-[0-9]*
 .stack-to-nix.cache
@@ -75,6 +76,9 @@ cabal.project.consensus
 
 */.tasty-rerun-log
 ouroboros-consensus-cardano/test/tools-test/disk/chaindb/
+
+# Integration test runtime artifacts
+test/integration/config/peer-snapshot.json
 
 # https://github.com/github/gitignore/blob/main/Haskell.gitignore
 dist

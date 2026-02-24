@@ -16,8 +16,6 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util
   )
 import System.FS.API.Types (FsPath, fsPathToList)
 import Test.QuickCheck
--- for Arbitrary Text
-import Test.QuickCheck.Instances ()
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
 
