@@ -13,8 +13,13 @@ import Data.Ord (comparing)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
-import "contra-tracer" Control.Tracer (Tracer (..), nullTracer, showTracing, stdoutTracer)
-
+import GenesisSyncAccelerator.RemoteStorage
+  ( FileType (..)
+  , RemoteStorageConfig (..)
+  , TraceRemoteStorageEvent (..)
+  , downloadChunk
+  , getFileName
+  )
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
@@ -24,11 +29,6 @@ import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.FilePath ((</>))
 import System.IO (IOMode (ReadMode), hGetContents, withFile)
 import qualified System.IO.Temp as Temp
-import Test.QuickCheck
-import Test.QuickCheck.Instances ()
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.QuickCheck (testProperty)
-
 import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Utilities
   ( allFileTypes
@@ -36,14 +36,11 @@ import Test.GenesisSyncAccelerator.Utilities
   , genSeveralChunkNumbers
   , getCurrentFilenamesForChunk
   )
-
-import GenesisSyncAccelerator.RemoteStorage
-  ( FileType (..)
-  , RemoteStorageConfig (..)
-  , TraceRemoteStorageEvent (..)
-  , downloadChunk
-  , getFileName
-  )
+import Test.QuickCheck
+import Test.QuickCheck.Instances ()
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.QuickCheck (testProperty)
+import "contra-tracer" Control.Tracer (Tracer (..), nullTracer, showTracing, stdoutTracer)
 
 {-# ANN module "HLint: ignore Use camelCase" #-}
 
@@ -111,7 +108,10 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
     targetChunk <- elements chunks
     missingFileTypes <- sublistOf currentFileTypes
     let kernels =
-          [ (ServerSide, ft, cn) | ft <- currentFileTypes, cn <- chunks, not $ ft `elem` missingFileTypes && cn == targetChunk
+          [ (ServerSide, ft, cn)
+          | ft <- currentFileTypes
+          , cn <- chunks
+          , not $ ft `elem` missingFileTypes && cn == targetChunk
           ]
     return (targetChunk, kernels, missingFileTypes)
 

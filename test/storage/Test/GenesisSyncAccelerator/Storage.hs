@@ -1,15 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Test.GenesisSyncAccelerator.Storage (tests) where
 
 import Control.Monad (foldM, unless)
-import System.Directory (doesFileExist)
-import System.FilePath ((</>))
-import qualified System.IO.Temp as Temp
-
 import qualified Data.Text as Text
 import GenesisSyncAccelerator.OnDemand (deleteChunkFiles)
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), getFileName, toSuffix)
@@ -23,13 +18,11 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Util
   , parseDBFile
   , renderFile
   )
+import System.Directory (doesFileExist)
 import System.FS.API.Types (FsPath, MountPoint (MountPoint), fsPathToList)
 import System.FS.IO (ioHasFS)
-import Test.QuickCheck
-import Test.QuickCheck.Instances ()
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.QuickCheck (testProperty)
-
+import System.FilePath ((</>))
+import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Utilities
   ( allFileTypes
@@ -37,6 +30,10 @@ import Test.GenesisSyncAccelerator.Utilities
   , getAllFilenamesForChunk
   , getCurrentFilenamesForChunk
   )
+import Test.QuickCheck
+import Test.QuickCheck.Instances ()
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.QuickCheck (testProperty)
 
 {-# ANN module "HLint: ignore Use camelCase" #-}
 
