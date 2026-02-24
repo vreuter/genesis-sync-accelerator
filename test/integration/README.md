@@ -12,8 +12,9 @@ Running this test requires a few tools to be in PATH including:
 - `ss`
 
 And of course `genesis-sync-accelerator`. To satisfy these
-requirements, you may enter the `integration-test` nix shell.
-From the root of the repository:
+requirements, you may enter the `integration-test` Nix shell.
+First, [download Nix](https://nixos.org/download/) if you don't yet have it.
+With Nix available, from the root of the repository:
 
 ```bash
 nix develop .#integration-test
