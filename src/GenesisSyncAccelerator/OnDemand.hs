@@ -201,21 +201,20 @@ mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, od
               -- Download only the current chunk before serving it.
               -- A failed download (e.g. 404) means we've reached the end
               -- of data available on the CDN.
-              ensureChunks cfg stateVar [c]
-              result <-
-                try @_ @SomeException $
-                  mkRawChunkIterator
-                    odcHasFS
-                    odcChunkInfo
-                    odcCodecConfig
-                    odcCheckIntegrity
-                    component
-                    from
-                    to
-                    [c]
-              case result of
-                Left _ex -> return IteratorExhausted
-                Right it -> do
+              ok <- ensureChunks cfg stateVar [c]
+              if not ok
+                then return IteratorExhausted
+                else do
+                  it <-
+                    mkRawChunkIterator
+                      odcHasFS
+                      odcChunkInfo
+                      odcCodecConfig
+                      odcCheckIntegrity
+                      component
+                      from
+                      to
+                      [c]
                   atomically $ writeTVar varCurrentIt (Just it)
                   next -- Transition to next chunk
     hasNext =
@@ -238,34 +237,39 @@ ensureChunks ::
   OnDemandConfig m blk h ->
   StrictTVar m OnDemandState ->
   [ChunkNo] ->
-  m ()
+  m Bool
 ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} stateVar requestedChunks = do
   -- 1. Identify and download missing chunks
   state <- readTVarIO stateVar
   let missingChunks = filter (\c -> not (Set.member c (odsCachedChunks state))) requestedChunks
 
-  unless (null missingChunks) $ do
-    liftIO $ mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
+  downloadResult <- liftIO $ try @_ @Remote.DownloadFailed $
+    mapM_ (Remote.downloadChunk odcTracer odcRemote) missingChunks
 
-  -- 2. Update usage order and identify chunks to prune
-  toPrune <- atomically $ do
-    curr <- readTVar stateVar
-    let
-      -- Move requested chunks to the head (most recently used)
-      newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
-      newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
+  case downloadResult of
+    Left _ex -> return False
+    Right () -> do
+      -- 2. Update usage order and identify chunks to prune
+      toPrune <- atomically $ do
+        curr <- readTVar stateVar
+        let
+          -- Move requested chunks to the head (most recently used)
+          newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
+          newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
 
-      -- Eviction: if we exceed the limit, prune the least recently used chunks.
-      -- We must keep all chunks currently requested to ensure iterator safety.
-      (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
-      updatedCached = Set.difference newCached (Set.fromList prune)
+          -- Eviction: if we exceed the limit, prune the least recently used chunks.
+          -- We must keep all chunks currently requested to ensure iterator safety.
+          (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
+          updatedCached = Set.difference newCached (Set.fromList prune)
 
-    writeTVar stateVar (OnDemandState updatedCached stay)
-    return prune
+        writeTVar stateVar (OnDemandState updatedCached stay)
+        return prune
 
-  -- 3. Physically delete pruned chunks from disk
-  unless (null toPrune) $
-    mapM_ (deleteChunkFiles odcHasFS) toPrune
+      -- 3. Physically delete pruned chunks from disk
+      unless (null toPrune) $
+        mapM_ (deleteChunkFiles odcHasFS) toPrune
+
+      return True
 
 -- | Deletes the triad of files associated with a chunk.
 deleteChunkFiles :: IOLike m => HasFS m h -> ChunkNo -> m ()

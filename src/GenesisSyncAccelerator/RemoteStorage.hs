@@ -9,6 +9,7 @@
 -- that constitute an ImmutableDB chunk from a remote HTTP server.
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
+  , DownloadFailed (..)
   , FileType (..)
   , RemoteStorageConfig (..)
   , RemoteStorageTracer
@@ -16,7 +17,7 @@ module GenesisSyncAccelerator.RemoteStorage
   , toSuffix
   ) where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (Exception, SomeException, throwIO, try)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
 import Data.Word (Word64)
@@ -49,6 +50,12 @@ data TraceRemoteStorageEvent
   deriving (Eq, Show)
 
 type RemoteStorageTracer m = Tracer m TraceRemoteStorageEvent
+
+-- | Exception thrown when a file download fails (HTTP error or non-200 status).
+newtype DownloadFailed = DownloadFailed String
+  deriving (Show)
+
+instance Exception DownloadFailed
 
 data FileType = ChunkFile | PrimaryIndexFile | SecondaryIndexFile | EpochFile
   deriving (Eq, Show)
@@ -87,7 +94,9 @@ downloadFile tracer manager cfg chunk fileType = do
   result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
 
   case result of
-    Left ex -> traceWith tracer $ TraceDownloadException filename (show ex)
+    Left ex -> do
+      traceWith tracer $ TraceDownloadException filename (show ex)
+      throwIO $ DownloadFailed filename
     Right response -> do
       let status = statusCode (responseStatus response)
       if status == 200
@@ -95,4 +104,6 @@ downloadFile tracer manager cfg chunk fileType = do
           let body = responseBody response
           LBS.writeFile localPath body
           traceWith tracer $ TraceDownloadSuccess filename (fromIntegral (LBS.length body))
-        else traceWith tracer $ TraceDownloadError filename status
+        else do
+          traceWith tracer $ TraceDownloadError filename status
+          throwIO $ DownloadFailed filename
