@@ -342,8 +342,8 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
     chunkSize <- withFile hasFS (fsPathChunkFile chunk) ReadMode (hGetSize hasFS)
     -- Determine per-chunk whether the first entry is an EBB by reading
     -- the primary index, rather than assuming all chunks start with EBBs.
-    mFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
-    let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mFirstSlot
+    mbFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
+    let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
     entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
     return $ map (chunk,) entries
 
