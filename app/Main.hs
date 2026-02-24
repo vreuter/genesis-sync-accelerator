@@ -11,8 +11,8 @@ import Data.List (intercalate)
 import Data.Void
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
 import GenesisSyncAccelerator.Parsers (parseAddr)
-import GenesisSyncAccelerator.Tracing (startResourceTracer)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
+import GenesisSyncAccelerator.Tracing (startResourceTracer)
 import GenesisSyncAccelerator.Types (HostAddr)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
