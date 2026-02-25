@@ -43,7 +43,7 @@ start_accelerator() {
     --db "$cache_dir" \
     --config "$config" \
     --rs-src-url "$cdn_url" \
-    --rs-cache-url "$cache_dir" \
+    --cache-dir "$cache_dir" \
     --port "$port" \
     --max-cached-chunks "$max_chunks" \
     +RTS -T -RTS \
