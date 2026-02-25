@@ -120,7 +120,7 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
           ]
     return (targetChunk, kernels, missingFileTypes)
 
--- Missing files are downloaded while existing files are left alone.
+-- Missing files are downloaded while existing files are overwritten.
 prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files :: Property
 prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
   forAll gen_target_chunk_and_file_kernels $ \(targetChunk, fileKernels) ->
@@ -134,6 +134,7 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
           Temp.withSystemTempDirectory tmpSub $ \tmp -> do
             setup@TestFolderSetup{..} <- setupFilesAndFolders tmp fileKernels
             preDownloadClientSideFileNames <- List.sort <$> listDirectory clientTmpdir
+            preDownloadServerSideFileNames <- listDirectory serverTmpdir
             unless
               (preDownloadClientSideFileNames == List.sort (Map.elems expectedPreDownloadFileNames))
               $ error
@@ -163,16 +164,16 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
                         False
                   else do
                     -- Check that the content of each file present before the download
-                    -- has remained the same, and that the content of the downloaded
-                    -- files matches expectation.
+                    -- has been replaced by the server-side content if the file was
+                    -- present on the server side, otherwise that the content remained
+                    -- the same, and that content of the downloaded files matches expectation.
+                    let (expDynamic, expStatic) = List.partition (`elem` preDownloadServerSideFileNames) filesAfterDownload
                     errorsFromExpectationOfStasis <-
                       catMaybes
-                        <$> mapM (\fn -> hasContent ClientSide $ clientTmpdir </> fn) preDownloadClientSideFileNames
+                        <$> mapM (\fn -> hasContent ClientSide $ clientTmpdir </> fn) expStatic
                     errorsFromExpectationOfDownload <-
                       catMaybes
-                        <$> mapM
-                          (\fn -> hasContent ServerSide $ clientTmpdir </> fn)
-                          (filter (`notElem` preDownloadClientSideFileNames) allTargetChunkFileNames)
+                        <$> mapM (\fn -> hasContent ServerSide $ clientTmpdir </> fn) expDynamic
                     pure $ case errorsFromExpectationOfStasis ++ errorsFromExpectationOfDownload of
                       [] -> property True
                       errors ->
