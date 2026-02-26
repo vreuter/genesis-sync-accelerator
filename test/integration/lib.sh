@@ -46,6 +46,7 @@ start_accelerator() {
     --rs-cache-url "$cache_dir" \
     --port "$port" \
     --max-cached-chunks "$max_chunks" \
+    +RTS -T -RTS \
     >"$log_file" 2>&1 &
   echo $!
 }

@@ -50,6 +50,7 @@ PIDS=()
 TMPDIR=""
 
 cleanup() {
+  local exit_code=$?
   echo ""
   echo "=== Cleanup ==="
   for pid in "${PIDS[@]}"; do
@@ -60,8 +61,12 @@ cleanup() {
     fi
   done
   if [[ -n "$TMPDIR" && -d "$TMPDIR" ]]; then
-    echo "  Removing $TMPDIR"
-    rm -rf "$TMPDIR"
+    if [[ "${KEEP_WORKDIR:-}" == "1" ]] || [[ "${KEEP_WORKDIR:-}" != "0" && $exit_code -ne 0 ]]; then
+      echo "  Keeping workdir for inspection: $TMPDIR"
+    else
+      echo "  Removing $TMPDIR"
+      rm -rf "$TMPDIR"
+    fi
   fi
 }
 trap cleanup EXIT
