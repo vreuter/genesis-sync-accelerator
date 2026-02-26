@@ -65,7 +65,7 @@ To install ghcup follow the instructions on site. After installing run
 ghcup tui
 ```
 
-And select recommended versions of GHC an cabal.
+And select recommended versions of GHC and cabal.
 
 ## Building the project
 
