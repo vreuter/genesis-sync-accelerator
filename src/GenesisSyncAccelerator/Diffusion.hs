@@ -10,14 +10,10 @@ import Control.ResourceRegistry
 import qualified Data.ByteString.Lazy as BL
 import Data.Functor.Contravariant ((>$<))
 import Data.Void (Void)
-import GenesisSyncAccelerator.MiniProtocols
-  ( BlockFetchTracer
-  , ChainSyncEventTracer
-  , ChainSyncMessageTracer
-  , genesisSyncAccelerator
-  )
+import GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
+import GenesisSyncAccelerator.Tracing (Tracers (..))
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
 import Ouroboros.Consensus.Block
@@ -95,15 +91,12 @@ run ::
   Maybe RemoteStorage.RemoteStorageConfig ->
   -- | Maximum number of chunks to keep in cache.
   Int ->
-  ChainSyncMessageTracer IO blk ->
-  ChainSyncEventTracer IO blk ->
-  BlockFetchTracer IO blk ->
-  RemoteStorage.RemoteStorageTracer IO ->
+  Tracers IO blk ->
   FilePath ->
   SockAddr ->
   TopLevelConfig blk ->
   IO Void
-run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer blockFetchTracer remoteStorageTracer immDBDir sockAddr cfg = withRegistry \registry ->
+run mbRemoteConfig maxCachedChunks tracers immDBDir sockAddr cfg = withRegistry \registry ->
   ImmutableDB.withDB
     (ImmutableDB.openDB (immDBArgs registry) runWithTempRegistry)
     \immDB -> do
@@ -113,7 +106,7 @@ run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer b
           OnDemand.decorateImmutableDB
             OnDemand.OnDemandConfig
               { OnDemand.odcRemote = remoteCfg
-              , OnDemand.odcTracer = remoteStorageTracer
+              , OnDemand.odcTracer = remoteStorageTracer tracers
               , OnDemand.odcChunkInfo = nodeImmutableDbChunkInfo storageCfg
               , OnDemand.odcHasFS = hasFS
               , OnDemand.odcCodecConfig = codecCfg
@@ -123,9 +116,7 @@ run mbRemoteConfig maxCachedChunks chainSyncMessageTracer chainSyncEventTracer b
             immDB
       serve sockAddr $
         genesisSyncAccelerator
-          chainSyncMessageTracer
-          chainSyncEventTracer
-          blockFetchTracer
+          tracers
           codecCfg
           encodeRemoteAddress
           decodeRemoteAddress
