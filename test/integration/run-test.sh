@@ -101,7 +101,8 @@ CHUNK_COUNT=$(find "$CDN_DATA" -name '*.chunk' | wc -l)
 echo "  CDN will serve $CHUNK_COUNT chunk(s)"
 
 # Count total blocks in the source data by dividing secondary index file sizes
-# by the fixed entry size (see ouroboros-consensus Secondary.entrySize).
+# by the fixed entry size (see ouroboros-consensus Secondary.entrySize, and 
+# section 8.2.2 of "The Cardano Consensus and Storage Layer" (Feb. 9, 2026).
 SECONDARY_ENTRY_SIZE=56
 EXPECTED_IMMUTABLE=0
 for f in "$CDN_DATA"/*.secondary; do
