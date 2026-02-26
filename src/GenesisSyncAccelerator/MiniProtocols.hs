@@ -27,8 +27,8 @@ import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 import GHC.Generics (Generic)
-import GenesisSyncAccelerator.Tracing (BlockFetchEventTracer, ChainSyncEventTracer, Tracers (..))
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
+import GenesisSyncAccelerator.Tracing (BlockFetchEventTracer, ChainSyncEventTracer, Tracers (..))
 import qualified Network.Mux as Mux
 import Ouroboros.Consensus.Block
 import Ouroboros.Consensus.MiniProtocol.BlockFetch.Server (blockFetchServer')

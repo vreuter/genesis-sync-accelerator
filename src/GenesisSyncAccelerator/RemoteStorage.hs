@@ -26,13 +26,13 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as Text
+import qualified Data.Text.Encoding as Text
+import Data.Word (Word64)
 import GenesisSyncAccelerator.Tracing
   ( RemoteStorageTracer
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-import qualified Data.Text.Encoding as Text
-import Data.Word (Word64)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
