@@ -95,7 +95,7 @@ nix build
 
 ## Code style
 
-CI checks formatting and linting. The dev shell provides all required tools:
+CI checks formatting and linting. The `nix develop` shell provides all required tools:
 
 - [`fourmolu`](https://github.com/fourmolu/fourmolu): Haskell code formatting
 - [`hlint`](https://github.com/ndmitchell/hlint): Haskell linting
