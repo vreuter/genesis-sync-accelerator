@@ -8,9 +8,11 @@ Thank you for your interest in contributing! We welcome contributions from the c
 
 ## Setting up the build tools
 
-### Using nix
+### Using nix (recommended)
 
-Make sure you have [Nix](https://nixos.org/download.html) installed with flakes support enabled.
+Nix is the preferred way of setting up a development environment for this repository.
+
+**Prerequesites**: make sure you have [Nix](https://nixos.org/download.html) installed with flakes support enabled.
 
 You can enter a Nix shell with all dependencies by running:
 
@@ -55,7 +57,10 @@ If you have [direnv](https://direnv.net/)  and [nix-direnv](https://github.com/n
 
 3. Now, whenever you `cd` into the project directory, direnv will automatically load the Nix environment.
 
-### Using cabal
+### Using cabal directly without nix (discouraged)
+
+**Note**: Using cabal without nix is not supported and not guaranteed to work. Nix is the only actively tested option.
+These instructions are only provided as a general guidance.
 
 In order to work with the project you need to install [GHC](https://www.haskell.org/ghc/)>= 9.6 and [cabal](https://www.haskell.org/cabal/)>=3.4. We suggest installing them using [GHCup](https://www.haskell.org/ghcup/) project.
 
@@ -70,6 +75,11 @@ And select recommended versions of GHC and cabal.
 ## Building the project
 
 To build the project in the project directory run command:
+
+
+### Building with Cabal
+
+Once you have a working development environment (e.g. with `nix develop`), you may build the project with:
 
 ``` sh
 cabal build all
@@ -118,6 +128,7 @@ nix build .#hydraJobs.x86_64-linux.required.native --print-build-logs
 1. **Fork the repository** and create your branch from `main`.
 1. **Clone your fork** and set up the project locally, see setting up section.
 1. **Make your changes** with clear, descriptive commit messages.
+   Please follow the [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) convention.
 1. **Open a Pull Request** describing your changes and referencing any related issues.
 
 ## Code of conduct
