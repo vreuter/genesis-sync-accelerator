@@ -1,16 +1,15 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Test.GenesisSyncAccelerator.Download (tests) where
 
 import Control.Monad (filterM, foldM, forM_, unless)
-import qualified Data.ByteString.Lazy as LBS
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Ord (comparing)
-import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
 import GenesisSyncAccelerator.RemoteStorage
@@ -28,7 +27,6 @@ import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
   )
 import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.FilePath ((</>))
-import System.IO (IOMode (ReadMode), hGetContents, withFile)
 import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Utilities
@@ -41,7 +39,7 @@ import Test.QuickCheck
 import Test.QuickCheck.Instances ()
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
-import "contra-tracer" Control.Tracer (Tracer (..), nullTracer, showTracing, stdoutTracer)
+import "contra-tracer" Control.Tracer (Tracer (..), nullTracer)
 
 {-# ANN module "HLint: ignore Use camelCase" #-}
 
@@ -60,7 +58,7 @@ prop_downloadChunk_downloads_files_as_expected_when_available =
         case initialTargetFolderContents of
           -- No file should yet be present in the target folder.
           [] -> do
-            runDownloadChunk nullTracer setup targetChunk
+            unsafeDownloadChunk nullTracer setup targetChunk
             posthocTargetFolderContents <- listDirectory clientTmpdir
             -- After the download, each of the current file types should be represented for the
             -- target chunk by a file; there should be no other content in the target folder.
@@ -95,7 +93,7 @@ prop_downloadChunk_traces_errors_as_expected_when_files_are_unavailable =
               [] -> do
                 -- Precondition passes; call the function under test then check that
                 -- the logfile contains all the expected error messages.
-                runDownloadChunk tracer setup targetChunk
+                unsafeDownloadChunk tracer setup targetChunk
                 logLines <- lines . Text.unpack <$> TIO.readFile logfile
                 pure $
                   List.sort (filter isExpectedLogLine logLines)
@@ -150,7 +148,7 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
               [] -> do
                 -- Run the function under test, then check that the list of files present
                 -- in the target folder is exactly as expected.
-                runDownloadChunk nullTracer setup targetChunk
+                unsafeDownloadChunk nullTracer setup targetChunk
                 filesAfterDownload <- List.sort <$> listDirectory clientTmpdir
                 if filesAfterDownload /= allTargetChunkFileNames
                   then
@@ -217,9 +215,6 @@ prop_downloadChunk_correctly_handles_mixed_local_preexistence_of_files =
 tmpSub :: String
 tmpSub = "download-test"
 
-tracerToStdout :: Show a => Tracer IO a
-tracerToStdout = showTracing stdoutTracer
-
 -- Trace values of given type to given file by appending the 'show' representation with a newline.
 tracerToFile :: Show a => FilePath -> Tracer IO a
 tracerToFile f = Tracer (\a -> appendFile f (show a ++ "\n"))
@@ -235,17 +230,17 @@ nameFile ft cn = Text.unpack $ getFileName ft cn
 -- Run a local HTTP file server of the contents of a temporary subdirectory, and then
 -- call into `downloadChunk` pointing to that server as the source and another temporary
 -- subdirectory as the destination.
-runDownloadChunk ::
+unsafeDownloadChunk ::
   Tracer IO TraceRemoteStorageEvent ->
   TestFolderSetup ->
   ChunkNo ->
-  IO (Either TraceDownloadFailure [FilePath])
-runDownloadChunk tracer TestFolderSetup{..} targetChunk =
+  IO ()
+unsafeDownloadChunk tracer TestFolderSetup{..} targetChunk =
   testWithApplication (pure $ staticApp $ defaultFileServerSettings serverTmpdir) $
     \port -> do
       let storageConfig =
             RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port ++ "/", rscDstDir = clientTmpdir}
-      downloadChunk tracer storageConfig targetChunk
+      either (error . show) (const ()) <$> downloadChunk tracer storageConfig targetChunk
 
 -- Within the given folder, create the filepaths specified by the given "kernel"s.
 setupFilesAndFolders :: FilePath -> [FileKernel] -> IO TestFolderSetup

@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 -- | Typeclass instances for tests
 module Test.GenesisSyncAccelerator.Orphans () where
 

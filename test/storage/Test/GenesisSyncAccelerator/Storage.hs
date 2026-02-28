@@ -25,8 +25,7 @@ import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
 import Test.GenesisSyncAccelerator.Orphans ()
 import Test.GenesisSyncAccelerator.Utilities
-  ( allFileTypes
-  , genSeveralChunkNumbers
+  ( genSeveralChunkNumbers
   , getAllFilenamesForChunk
   , getCurrentFilenamesForChunk
   )

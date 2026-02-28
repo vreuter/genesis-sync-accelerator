@@ -17,9 +17,16 @@ common common-all
     -Wredundant-constraints
     -Wmissing-export-lists
     -Wunused-packages
-  
+
   build-depends:
-    base,
+    base
+
+common common-test
+  build-depends:
+    QuickCheck,
+    quickcheck-instances,
+    tasty,
+    tasty-quickcheck,
 
 executable genesis-sync-accelerator
   import: common-all
@@ -115,6 +122,7 @@ library
     trace-resources,
 
 library gsa-testlib
+  import: common-all
   hs-source-dirs: src/gsa-testlib
   exposed-modules:
     Test.GenesisSyncAccelerator.Orphans
@@ -127,6 +135,7 @@ library gsa-testlib
     text,
 
 test-suite storage-tests
+  import: common-all, common-test
   main-is: Main.hs
   hs-source-dirs: test/storage
   type: exitcode-stdio-1.0
@@ -135,17 +144,12 @@ test-suite storage-tests
     -rtsopts
 
   build-depends:
-    QuickCheck,
-    base,
     directory,
     filepath,
     fs-api,
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
-    quickcheck-instances,
-    tasty,
-    tasty-quickcheck,
     temporary,
     text,
 
@@ -153,6 +157,7 @@ test-suite storage-tests
     Test.GenesisSyncAccelerator.Storage
 
 test-suite download-tests
+  import: common-all, common-test
   main-is: Main.hs
   hs-source-dirs: test/download
   type: exitcode-stdio-1.0
@@ -161,9 +166,6 @@ test-suite download-tests
     -rtsopts
 
   build-depends:
-    QuickCheck,
-    base,
-    bytestring,
     containers,
     contra-tracer,
     directory,
@@ -171,12 +173,8 @@ test-suite download-tests
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
     ouroboros-consensus,
-    quickcheck-instances,
-    tasty,
-    tasty-quickcheck,
     temporary,
     text,
-    wai,
     wai-app-static,
     warp,
 
