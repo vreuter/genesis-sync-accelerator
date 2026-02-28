@@ -48,6 +48,7 @@ executable genesis-sync-accelerator
     GenesisSyncAccelerator.RemoteStorage
     GenesisSyncAccelerator.Tracing
     GenesisSyncAccelerator.Types
+    GenesisSyncAccelerator.Util
 
   build-depends:
     aeson,
@@ -69,8 +70,10 @@ executable genesis-sync-accelerator
     network-mux,
     optparse-applicative,
     ouroboros-consensus,
+    ouroboros-consensus-cardano,
     ouroboros-consensus-cardano:unstable-cardano-tools,
     ouroboros-consensus-diffusion,
+    ouroboros-consensus-protocol,
     ouroboros-network,
     ouroboros-network-api,
     ouroboros-network-framework,
@@ -87,12 +90,13 @@ library
   exposed-modules:
     GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.RemoteStorage
+    GenesisSyncAccelerator.Tracing
+    GenesisSyncAccelerator.Util
 
   other-modules:
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
     GenesisSyncAccelerator.Parsers
-    GenesisSyncAccelerator.Tracing
     GenesisSyncAccelerator.Types
 
   build-depends:
@@ -113,7 +117,10 @@ library
     network,
     network-mux,
     ouroboros-consensus,
+    ouroboros-consensus-cardano,
+    ouroboros-consensus-cardano:unstable-cardano-tools,
     ouroboros-consensus-diffusion,
+    ouroboros-consensus-protocol,
     ouroboros-network,
     ouroboros-network-api,
     ouroboros-network-framework,
@@ -182,3 +189,28 @@ test-suite download-tests
 
   other-modules:
     Test.GenesisSyncAccelerator.Download
+
+test-suite on-demand-tests
+  import: common-all, common-test
+  main-is: Main.hs
+  hs-source-dirs: test/on-demand
+  type: exitcode-stdio-1.0
+  ghc-options:
+    -threaded
+    -rtsopts
+
+  build-depends:
+    QuickCheck,
+    contra-tracer,
+    genesis-sync-accelerator,
+    io-classes,
+    ouroboros-consensus,
+    strict-checked-vars,
+    tasty,
+    tasty-quickcheck,
+
+  data-files:
+    test/data/config.json
+
+  other-modules:
+    Test.GenesisSyncAccelerator.OnDemandRuntime

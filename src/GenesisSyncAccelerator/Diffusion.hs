@@ -13,6 +13,7 @@ import GenesisSyncAccelerator.MiniProtocols (genesisSyncAccelerator)
 import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..))
+import GenesisSyncAccelerator.Util (fpToHasFS)
 import qualified Network.Mux as Mux
 import Network.Socket (SockAddr (..))
 import Ouroboros.Consensus.Block
@@ -38,8 +39,6 @@ import qualified Ouroboros.Network.Protocol.Handshake as Handshake
 import qualified Ouroboros.Network.Server.Simple as Server
 import qualified Ouroboros.Network.Snocket as Snocket
 import Ouroboros.Network.Socket (SomeResponderApplication (..), configureSocket)
-import System.FS.API.Types (MountPoint (MountPoint))
-import System.FS.IO (ioHasFS)
 import "contra-tracer" Control.Tracer
 
 -- | Glue code for using just the bits from the Diffusion Layer that we need in
@@ -97,7 +96,7 @@ run mbRemoteConfig maxCachedChunks tracers sockAddr cfg =
     Nothing -> throwIO MissingRemoteConfig
     Just remoteCfg -> do
       let cacheDir = RemoteStorage.rscDstDir remoteCfg
-          hasFS = ioHasFS $ MountPoint cacheDir
+          hasFS = fpToHasFS cacheDir
       onDemand <-
         OnDemand.newOnDemandRuntime
           OnDemand.OnDemandConfig

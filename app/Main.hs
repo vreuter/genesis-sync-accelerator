@@ -5,8 +5,6 @@
 module Main (main) where
 
 import Cardano.Crypto.Init (cryptoInit)
-import qualified Cardano.Tools.DBAnalyser.Block.Cardano as Cardano
-import Cardano.Tools.DBAnalyser.HasAnalysis (mkProtocolInfo)
 import Data.List (intercalate)
 import Data.Void
 import qualified GenesisSyncAccelerator.Diffusion as Diffusion
@@ -14,10 +12,10 @@ import GenesisSyncAccelerator.Parsers (parseAddr)
 import qualified GenesisSyncAccelerator.RemoteStorage as RemoteStorage
 import GenesisSyncAccelerator.Tracing (Tracers (..), startResourceTracer)
 import GenesisSyncAccelerator.Types (HostAddr)
+import GenesisSyncAccelerator.Util (getTopLevelConfig)
 import Main.Utf8 (withStdTerminalHandles)
 import qualified Network.Socket as Socket
 import Options.Applicative
-import Ouroboros.Consensus.Node.ProtocolInfo (ProtocolInfo (..))
 import System.IO (BufferMode (..), hSetBuffering, stdout)
 import "contra-tracer" Control.Tracer (showTracing, stdoutTracer, traceWith)
 
@@ -38,7 +36,6 @@ main = withStdTerminalHandles $ do
   let sockAddr = Socket.SockAddrInet port hostAddr
        where
         hostAddr = Socket.tupleToHostAddress addr
-      args = Cardano.CardanoBlockArgs configFile Nothing
       tracers =
         Tracers
           { blockFetchMessageTracer = showTracing stdoutTracer
@@ -47,7 +44,7 @@ main = withStdTerminalHandles $ do
           , chainSyncEventTracer = showTracing stdoutTracer
           , remoteStorageTracer = showTracing stdoutTracer
           }
-  ProtocolInfo{pInfoConfig} <- mkProtocolInfo args
+  pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer rtsFrequency
   let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
