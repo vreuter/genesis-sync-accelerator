@@ -17,6 +17,9 @@ common common-all
     -Wredundant-constraints
     -Wmissing-export-lists
     -Wunused-packages
+  
+  build-depends:
+    base,
 
 executable genesis-sync-accelerator
   import: common-all
@@ -41,7 +44,7 @@ executable genesis-sync-accelerator
 
   build-depends:
     async,
-    base,
+    base16-bytestring,
     bytestring,
     cardano-crypto-class,
     cborg,
@@ -86,7 +89,7 @@ library
 
   build-depends:
     async,
-    base,
+    base16-bytestring,
     bytestring,
     cborg,
     containers,
@@ -119,7 +122,6 @@ library gsa-testlib
 
   build-depends:
     QuickCheck,
-    base,
     genesis-sync-accelerator,
     ouroboros-consensus,
     text,
