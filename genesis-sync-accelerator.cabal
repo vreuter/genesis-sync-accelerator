@@ -154,6 +154,7 @@ test-suite storage-tests
 
   build-depends:
     directory,
+    exceptions,
     filepath,
     fs-api,
     genesis-sync-accelerator,
@@ -178,6 +179,7 @@ test-suite download-tests
     containers,
     contra-tracer,
     directory,
+    exceptions,
     filepath,
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
@@ -202,6 +204,7 @@ test-suite on-demand-tests
   build-depends:
     QuickCheck,
     contra-tracer,
+    exceptions,
     genesis-sync-accelerator,
     io-classes,
     ouroboros-consensus,
