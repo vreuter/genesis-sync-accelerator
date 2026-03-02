@@ -110,6 +110,7 @@ data OnDemandRuntime m blk h = OnDemandRuntime
   , odrState :: StrictTVar m (OnDemandState blk)
   }
 
+-- | Initializes the on-demand runtime by fetching the current tip from the remote storage.
 newOnDemandRuntime ::
   (IOLike m, MonadIO m, StandardHash blk, ConvertRawHash blk) =>
   OnDemandConfig m blk h ->
