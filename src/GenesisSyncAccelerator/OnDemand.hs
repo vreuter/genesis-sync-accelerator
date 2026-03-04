@@ -20,7 +20,7 @@ module GenesisSyncAccelerator.OnDemand
   ( OnDemandConfig (..)
   , OnDemandRuntime (..)
   , OnDemandTip (..)
-  , OnDemandState
+  , OnDemandState (..)
   , deleteChunkFiles
   , newOnDemandRuntime
   , onDemandIteratorForRange

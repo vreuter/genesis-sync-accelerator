@@ -5,6 +5,8 @@ license: Apache-2.0
 author: Modus Create, LLC.
 maintainer: erin.vanderveen@tweag.io
 build-type: Simple
+data-files:
+  test/data/**/*.json
 
 common common-all
   ghc-options:
@@ -90,13 +92,13 @@ library
     GenesisSyncAccelerator.OnDemand
     GenesisSyncAccelerator.RemoteStorage
     GenesisSyncAccelerator.Tracing
+    GenesisSyncAccelerator.Types
     GenesisSyncAccelerator.Util
 
   other-modules:
     GenesisSyncAccelerator.Diffusion
     GenesisSyncAccelerator.MiniProtocols
     GenesisSyncAccelerator.Parsers
-    GenesisSyncAccelerator.Types
 
   build-depends:
     aeson,
@@ -205,15 +207,17 @@ test-suite on-demand-tests
   build-depends:
     contra-tracer,
     exceptions,
+    filepath,
+    fs-api,
     genesis-sync-accelerator,
-    io-classes,
     ouroboros-consensus,
     strict-checked-vars,
     tasty,
     tasty-quickcheck,
-
-  data-files:
-    test/data/config.json
+    temporary,
+    wai-app-static,
+    warp,
 
   other-modules:
+    Paths_genesis_sync_accelerator
     Test.GenesisSyncAccelerator.OnDemandRuntime

@@ -48,6 +48,7 @@ data RemoteStorageConfig = RemoteStorageConfig
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
   }
+  deriving (Eq, Show)
 
 data RemoteTipInfo = RemoteTipInfo
   { rtiSlot :: Word64
@@ -118,7 +119,10 @@ downloadFile eventTracer manager cfg chunk fileType = do
 fetchTipInfo :: RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Maybe RemoteTipInfo)
 fetchTipInfo tracer cfg = do
   manager <- newManager tlsManagerSettings
-  let tipUrl = rscSrcUrl cfg ++ "/tip.json"
+  let tipFileName = "tip.json"
+      url = rscSrcUrl cfg
+      -- TODO: make this more robust (e.g., handle trailing slash in rscSrcUrl)
+      tipUrl = url ++ (if last url == '/' then "" else "/") ++ tipFileName
   traceWith tracer $ TraceDownloadStart tipUrl
   request <- parseRequest tipUrl
   result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
