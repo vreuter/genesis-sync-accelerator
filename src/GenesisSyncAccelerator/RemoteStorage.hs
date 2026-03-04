@@ -168,7 +168,4 @@ instance FromJSON RemoteTipJson where
       <*> o .: "hash"
 
 decodeTipHash :: Text.Text -> Either String BS.ByteString
-decodeTipHash hashText =
-  case Base16.decode (Text.encodeUtf8 hashText) of
-    Left err -> Left err
-    Right bytes -> Right bytes
+decodeTipHash =Base16.decode . Text.encodeUtf8
