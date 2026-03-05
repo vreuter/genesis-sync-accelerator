@@ -16,12 +16,14 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy (Proxy (..))
 import qualified Data.Text.Encoding as Encoding
+import GHC.Conc (atomically)
 import GenesisSyncAccelerator.OnDemand
   ( OnDemandConfig (..)
   , OnDemandRuntime (..)
   , OnDemandState (..)
   , OnDemandTip (..)
   , newOnDemandRuntime
+  , readOnDemandTip
   , tipFromRemote
   )
 import GenesisSyncAccelerator.RemoteStorage (RemoteStorageConfig (..), RemoteTipInfo (..))
@@ -113,8 +115,8 @@ prop_newOnDemandRuntimeStartsWithCorrectTip partialConfig tip =
       testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $
         \port -> do
           config <- mkFullConfig partialConfig (ConfigFile $ tmp </> topLevelConfigFileName) (TmpDir tmp) port
-          state <- newOnDemandRuntime config >>= readTVarIO . odrState
-          case odsTip state of
+          mbTip <- newOnDemandRuntime config >>= atomically . readOnDemandTip
+          case mbTip of
             Nothing -> return $ counterexample "Failed to fetch tip info" False
             Just observedTip -> return $ observedTip === tipFromRemote tip
 
