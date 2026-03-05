@@ -26,6 +26,7 @@ module GenesisSyncAccelerator.OnDemand
   , onDemandIteratorForRange
   , onDemandIteratorFrom
   , readOnDemandTip
+  , tipFromRemote
   ) where
 
 import Control.Monad (forM, unless, void)
@@ -142,6 +143,10 @@ data OnDemandTip blk = OnDemandTip
   , odtBlockNo :: BlockNo
   }
   deriving Generic
+
+deriving instance Eq (HeaderHash blk) => Eq (OnDemandTip blk)
+
+deriving instance Show (HeaderHash blk) => Show (OnDemandTip blk)
 
 deriving instance NoThunks (HeaderHash blk) => NoThunks (OnDemandTip blk)
 

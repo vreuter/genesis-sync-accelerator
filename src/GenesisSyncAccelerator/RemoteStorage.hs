@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
+{-# LANGUAGE RecordWildCards #-}
 
 -- | HTTP client for downloading ImmutableDB chunks from a CDN.
 --
@@ -21,7 +22,7 @@ module GenesisSyncAccelerator.RemoteStorage
   ) where
 
 import Control.Exception (SomeException, try)
-import Data.Aeson (FromJSON (..), eitherDecode, withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), eitherDecode, object, withObject, (.:), (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
@@ -138,10 +139,9 @@ fetchTipInfo tracer cfg = do
           pure Nothing
         else
           either
-            ( \err -> traceWith tracer (TraceDownloadFailure $ TraceDownloadException tipUrl err) >> pure Nothing
-            )
-            (pure . Just) $
-            eitherDecode (responseBody response)
+            (\err -> traceWith tracer (TraceDownloadFailure $ TraceDownloadException tipUrl err) >> pure Nothing)
+            (pure . Just)
+            $ eitherDecode (responseBody response)
 
 instance FromJSON RemoteTipInfo where
   parseJSON = withObject "RemoteTipInfo" $ \o ->
@@ -152,6 +152,14 @@ instance FromJSON RemoteTipInfo where
               Left err -> fail $ "Failed to decode tip hash: " ++ err
               Right hashBytes -> pure hashBytes
           )
+
+instance ToJSON RemoteTipInfo where
+  toJSON RemoteTipInfo{..} =
+    object
+      [ "slot" .= rtiSlot
+      , "block_no" .= rtiBlockNo
+      , "hash" .= Text.decodeUtf8 (Base16.encode rtiHashBytes)
+      ]
 
 decodeTipHash :: Text.Text -> Either String BS.ByteString
 decodeTipHash = Base16.decode . Text.encodeUtf8

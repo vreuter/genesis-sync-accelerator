@@ -205,16 +205,21 @@ test-suite on-demand-tests
     -rtsopts
 
   build-depends:
+    aeson,
+    bytestring,
     contra-tracer,
+    directory,
     exceptions,
     filepath,
     fs-api,
     genesis-sync-accelerator,
     ouroboros-consensus,
+    ouroboros-consensus-cardano,
     strict-checked-vars,
     tasty,
     tasty-quickcheck,
     temporary,
+    text,
     wai-app-static,
     warp,
 
