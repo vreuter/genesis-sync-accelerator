@@ -23,6 +23,7 @@ module GenesisSyncAccelerator.OnDemand
   , OnDemandTip (..)
   , OnDemandState (..)
   , deleteChunkFiles
+  , dummyTip
   , newOnDemandRuntime
   , onDemandIteratorForRange
   , onDemandIteratorFrom
@@ -114,21 +115,25 @@ data OnDemandRuntime m blk h = OnDemandRuntime
   , odrState :: StrictTVar m (OnDemandState blk)
   }
 
+dummyTip :: forall blk. ConvertRawHash blk => OnDemandTip blk
+dummyTip = OnDemandTip maxBound (dummyHash (Proxy @blk)) maxBound
+ where
+  dummyHash proxy = fromRawHash proxy (LBS.toStrict (LBS.replicate (fromIntegral (hashSize proxy)) 0))
+
 -- | Initializes the on-demand runtime by fetching the current tip from the remote storage.
 newOnDemandRuntime ::
+  forall blk m h.
   (IOLike m, MonadIO m, StandardHash blk, ConvertRawHash blk) =>
   OnDemandConfig m blk h ->
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg = do
-  stateVar <- newTVarIO (OnDemandState Set.empty [] Nothing)
-  errorOrTip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
-  case tipFromRemote <$> errorOrTip of
-    Left err -> do
-      liftIO $ traceWith (odcTracer cfg) $ TraceDownloadFailure err
-      pure $ OnDemandRuntime cfg stateVar
-    Right tipInfo -> do
-      atomically $ writeTVar stateVar (OnDemandState Set.empty [] (Just tipInfo))
-      pure $ OnDemandRuntime cfg stateVar
+  tip <- liftIO $ getTip False >>= procTip
+  stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
+  pure $ OnDemandRuntime cfg stateVar
+ where
+  getTip False = return $ Right dummyTip
+  getTip True = fmap tipFromRemote <$> Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
+  procTip = either (\e -> traceWith (odcTracer cfg) (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
 -- | Internal state tracking which chunks have been downloaded during the current session.
 data OnDemandState blk = OnDemandState

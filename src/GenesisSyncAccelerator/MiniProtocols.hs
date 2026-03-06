@@ -265,10 +265,9 @@ chainSyncServer tr onDemand blockComponent _registry = ChainSyncServer $ do
         }
 
   getImmutableTip :: STM m (Tip blk)
-  getImmutableTip = do
-    OnDemand.readOnDemandTip onDemand >>= \case
-      Nothing -> pure TipGenesis
-      Just tip -> pure $ tipFromOnDemandTip tip
+  getImmutableTip =
+    maybe TipGenesis (const $ tipFromOnDemandTip OnDemand.dummyTip)
+      <$> OnDemand.readOnDemandTip onDemand
 
 blockFetchServer ::
   forall m blk a h.

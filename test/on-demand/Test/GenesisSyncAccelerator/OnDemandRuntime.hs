@@ -13,7 +13,6 @@ import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Aeson (ToJSON (..), decode, encode, object, (.=))
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy (Proxy (..))
 import qualified Data.Text.Encoding as Encoding
 import GHC.Conc (atomically)
@@ -22,9 +21,9 @@ import GenesisSyncAccelerator.OnDemand
   , OnDemandRuntime (..)
   , OnDemandState (..)
   , OnDemandTip (..)
+  , dummyTip
   , newOnDemandRuntime
   , readOnDemandTip
-  , tipFromRemote
   )
 import GenesisSyncAccelerator.RemoteStorage (RemoteStorageConfig (..), RemoteTipInfo (..))
 import GenesisSyncAccelerator.Types (StandardBlock)
@@ -101,24 +100,19 @@ prop_newOnDemandRuntimeStartsWithEmptyUsageOrder partialConfig =
       usageOrder <- odsUsageOrder <$> readTVarIO (odrState runtime)
       return $ property $ null usageOrder
 
-prop_newOnDemandRuntimeStartsWithCorrectTip ::
-  PartialOnDemandConfig -> RemoteTipInfo -> Property
-prop_newOnDemandRuntimeStartsWithCorrectTip partialConfig tip =
+prop_newOnDemandRuntimeStartsWithDummyTip :: PartialOnDemandConfig -> Property
+prop_newOnDemandRuntimeStartsWithDummyTip partialConfig =
   ioProperty $
     withTemp $ \tmp -> do
-      let tipFileName = "tip.json"
       dataDir <- takeDirectory <$> getDataFileName topLevelConfigFileRelativePath
-      listDirectory dataDir
-        >>= mapM_
-          (\fn -> if fn == tipFileName then return () else copyFile (dataDir </> fn) (tmp </> fn))
-      LBS.writeFile (tmp </> tipFileName) $ encode tip
+      listDirectory dataDir >>= mapM_ (\fn -> copyFile (dataDir </> fn) (tmp </> fn))
       testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $
         \port -> do
           config <- mkFullConfig partialConfig (ConfigFile $ tmp </> topLevelConfigFileName) (TmpDir tmp) port
           mbTip <- newOnDemandRuntime config >>= atomically . readOnDemandTip
           case mbTip of
             Nothing -> return $ counterexample "Failed to fetch tip info" False
-            Just observedTip -> return $ observedTip === tipFromRemote tip
+            Just observedTip -> return $ observedTip === dummyTip
 
 prop_RemoteTipInfoRoundtripsThroughJSON :: RemoteTipInfo -> Property
 prop_RemoteTipInfoRoundtripsThroughJSON tipInfo = decode (encode tipInfo) === Just tipInfo
@@ -224,8 +218,8 @@ tests =
         "newOnDemandRuntime starts with empty usageorder"
         prop_newOnDemandRuntimeStartsWithEmptyUsageOrder
     , testProperty
-        "newOnDemandRuntime starts with correct tip info from remote"
-        prop_newOnDemandRuntimeStartsWithCorrectTip
+        "newOnDemandRuntime starts with dummy tip info"
+        prop_newOnDemandRuntimeStartsWithDummyTip
     , testProperty
         "RemoteTipInfo roundtrips through JSON encoding/decoding"
         prop_RemoteTipInfoRoundtripsThroughJSON
