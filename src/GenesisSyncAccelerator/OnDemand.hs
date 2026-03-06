@@ -399,7 +399,7 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component chunks s
                 component
             atomically $ do
               curr <- readTVar stateVar
-              writeTVar stateVar curr{odsTip = Just (tipFromEntry chunkInfo entry)}
+              writeTVar stateVar curr{odsTip = Just (tipFromEntry False chunkInfo entry)}
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
@@ -428,8 +428,9 @@ chunksFrom ci from = iterate nextChunk (chunkForFrom ci from)
  where
   nextChunk (ChunkNo n) = ChunkNo (n + 1)
 
-tipFromEntry :: ChunkInfo -> Entry blk -> OnDemandTip blk
-tipFromEntry ci entry =
+tipFromEntry :: ConvertRawHash blk => Bool -> ChunkInfo -> Entry blk -> OnDemandTip blk
+tipFromEntry False _ _ = dummyTip
+tipFromEntry True ci entry =
   let RealPoint slot hash = tipToRealPoint ci entry
    in OnDemandTip slot hash (BlockNo (unSlotNo slot))
 
