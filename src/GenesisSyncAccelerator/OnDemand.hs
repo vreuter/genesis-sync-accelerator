@@ -31,7 +31,7 @@ module GenesisSyncAccelerator.OnDemand
   , tipFromRemote
   ) where
 
-import Control.Concurrent.Async (Async, async, wait)
+import Control.Concurrent.Async (Async, async, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
 import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -368,10 +368,18 @@ awaitDownload ::
   IO (Either Remote.TraceDownloadFailure [FilePath])
 awaitDownload tracer env ps@PrefetchState{psJobs} chunk = do
   job <- startDownload tracer env ps chunk
-  result <- wait job
-  modifyMVar_ psJobs $ \pj ->
-    return pj{pjDownloads = Map.delete chunk (pjDownloads pj)}
-  return result
+  let cleanup =
+        modifyMVar_ psJobs $ \pj ->
+          return pj{pjDownloads = Map.delete chunk (pjDownloads pj)}
+  outcome <- waitCatch job `onException` cleanup
+  cleanup
+  return $ case outcome of
+    Left ex ->
+      Left $
+        Remote.TraceDownloadException
+          ("chunk " <> show chunk)
+          (show ex)
+    Right result -> result
 
 -- | Fire-and-forget background downloads for the given chunks.
 prefetchChunks ::
