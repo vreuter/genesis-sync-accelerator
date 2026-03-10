@@ -33,23 +33,30 @@ import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (testWithApplication)
-import Ouroboros.Consensus.Block (BlockNo (..), ConvertRawHash (fromRawHash, toRawHash), SlotNo (..))
+import Ouroboros.Consensus.Block
+  ( BlockNo (..)
+  , ConvertRawHash (fromRawHash, toRawHash)
+  , SlotNo (..)
+  )
 import Ouroboros.Consensus.Cardano.Block (CardanoBlock, CardanoEras, StandardCrypto)
 import Ouroboros.Consensus.Config (configCodec)
 import Ouroboros.Consensus.HardFork.Combinator.AcrossEras (OneEraHash)
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo (..), ChunkNo (..), ChunkSize (..))
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
+  ( ChunkInfo (..)
+  , ChunkNo (..)
+  , ChunkSize (..)
+  )
 import Paths_genesis_sync_accelerator (getDataFileName)
 import System.Directory (doesFileExist)
 import System.FS.IO (HandleIO)
 import System.FilePath (takeDirectory, (</>))
 import qualified System.IO.Temp as Temp
+import Test.GenesisSyncAccelerator.Utilities (getCurrentFilenamesForChunk)
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Test.Tasty.QuickCheck (testProperty)
 import "contra-tracer" Control.Tracer (nullTracer)
-
-import Test.GenesisSyncAccelerator.Utilities (getCurrentFilenamesForChunk)
 
 ----------------------------- Generators and properties -----------------------------
 instance Arbitrary ChunkInfo where
@@ -129,11 +136,12 @@ test_ensureChunksLRU = do
 
     withTemp $ \cacheDir -> do
       testWithApplication (pure $ staticApp $ defaultFileServerSettings remoteDir) $ \port -> do
-        let partialConfig = PartialOnDemandConfig
-              { podcChunkInfo = UniformChunkSize (ChunkSize False 10)
-              , podcIntegrityConstant = True
-              , podcMaxCachedChunks = 2
-              }
+        let partialConfig =
+              PartialOnDemandConfig
+                { podcChunkInfo = UniformChunkSize (ChunkSize False 10)
+                , podcIntegrityConstant = True
+                , podcMaxCachedChunks = 2
+                }
         configFile <- getDataFileName topLevelConfigFileRelativePath
         config <- mkFullConfig partialConfig (ConfigFile configFile) (TmpDir cacheDir) port
         runtime <- newOnDemandRuntime config
@@ -146,12 +154,18 @@ test_ensureChunksLRU = do
         -- Request chunk 1
         _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 1]
         state1 <- readTVarIO (odrState runtime)
-        assertEqual "Cache contains chunks 0 and 1" (Set.fromList [ChunkNo 0, ChunkNo 1]) (odsCachedChunks state1)
+        assertEqual
+          "Cache contains chunks 0 and 1"
+          (Set.fromList [ChunkNo 0, ChunkNo 1])
+          (odsCachedChunks state1)
 
         -- Request chunk 2
         _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 2]
         state2 <- readTVarIO (odrState runtime)
-        assertEqual "Cache contains chunks 1 and 2" (Set.fromList [ChunkNo 1, ChunkNo 2]) (odsCachedChunks state2)
+        assertEqual
+          "Cache contains chunks 1 and 2"
+          (Set.fromList [ChunkNo 1, ChunkNo 2])
+          (odsCachedChunks state2)
         assertEqual "Chunk 0 evicted from state" False (ChunkNo 0 `Set.member` odsCachedChunks state2)
 
         -- Verify files deleted from disk
