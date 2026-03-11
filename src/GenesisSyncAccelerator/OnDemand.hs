@@ -45,6 +45,7 @@ import qualified Data.Set as Set
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
 import GenesisSyncAccelerator.Tracing (TraceRemoteStorageEvent (..))
+import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
 import Ouroboros.Consensus.Block
   ( BlockNo (..)
   , CodecConfig
@@ -116,9 +117,9 @@ data OnDemandConfig m blk h = OnDemandConfig
   -- ^ Codec configuration for block extraction.
   , odcCheckIntegrity :: blk -> Bool
   -- ^ Integrity check for extracted blocks.
-  , odcMaxCachedChunks :: Int
+  , odcMaxCachedChunks :: MaxCachedChunksCount
   -- ^ Maximum number of chunks to keep in cache.
-  , odcPrefetchAhead :: Int
+  , odcPrefetchAhead :: PrefetchChunksCount
   -- ^ Number of chunks to prefetch ahead of current position.
   }
 
@@ -239,11 +240,11 @@ mkOnDemandIterator ::
   Maybe (StreamTo blk) ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity, odcTracer, odcPrefetchAhead}, odrEnv, odrState, odrPrefetch} component from to chunks = do
+mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity, odcTracer, odcPrefetchAhead = PrefetchChunksCount numPrefetch}, odrEnv, odrState, odrPrefetch} component from to chunks = do
   varChunks <- newTVarIO chunks
   varCurrentIt <- newTVarIO Nothing
   {-
-   Track the current prefetch window in a TVar so that chunks can get unpineed:
+   Track the current prefetch window in a TVar so that chunks can get unpinned:
    - when the iterator moves forward
    - or when the iterator is closed (e.g. on exception)
   -}
@@ -319,7 +320,7 @@ mkOnDemandIterator OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcHasFS, odcC
               atomically $ writeTVar varChunks rest
 
               -- Compute and set new active prefetch window.
-              let newWindow = c : take odcPrefetchAhead rest
+              let newWindow = c : take (fromIntegral numPrefetch) rest
               updatePrefetchWindow newWindow
 
               -- Start background prefetches for uncached chunks in the window
@@ -412,7 +413,7 @@ registerInCache ::
   StrictTVar m (OnDemandState blk) ->
   ChunkNo ->
   m ()
-registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks} PrefetchState{psJobs} stateVar chunk = do
+registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCount numChunks} PrefetchState{psJobs} stateVar chunk = do
   pj <- liftIO $ takeMVar psJobs
   toPrune <- atomically $ do
     let pinned = pjPinnedChunks pj
@@ -421,7 +422,7 @@ registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks} PrefetchState{psJob
       newUsage = chunk : delete chunk (odsUsageOrder curr)
       newCached = Set.insert chunk (odsCachedChunks curr)
       -- Split into chunks to keep vs candidates for eviction
-      (stay, candidates) = splitAt odcMaxCachedChunks newUsage
+      (stay, candidates) = splitAt (fromIntegral numChunks) newUsage
       -- Only evict unpinned chunks
       (keepPinned, prune) = partition (`Map.member` pinned) candidates
       finalUsage = stay ++ keepPinned
