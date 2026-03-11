@@ -121,11 +121,6 @@ data OnDemandRuntime m blk h = OnDemandRuntime
   , odrState :: StrictTVar m (OnDemandState blk)
   }
 
-dummyTip :: forall blk. ConvertRawHash blk => OnDemandTip blk
-dummyTip = OnDemandTip maxBound (dummyHash (Proxy @blk)) maxBound
- where
-  dummyHash proxy = fromRawHash proxy (LBS.toStrict (LBS.replicate (fromIntegral (hashSize proxy)) 0))
-
 -- | Initializes the on-demand runtime by fetching the current tip from the remote storage.
 newOnDemandRuntime ::
   forall blk m h.
@@ -133,12 +128,10 @@ newOnDemandRuntime ::
   OnDemandConfig m blk h ->
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg = do
-  tip <- liftIO $ getTip True >>= procTip
+  tip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg) >>= procTip . fmap tipFromRemote
   stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
   pure $ OnDemandRuntime cfg stateVar
  where
-  getTip False = return $ Right dummyTip
-  getTip True = fmap tipFromRemote <$> Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg)
   procTip = either (\e -> traceWith (odcTracer cfg) (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
 -- | Internal state tracking which chunks have been downloaded during the current session.
