@@ -36,7 +36,8 @@ import GenesisSyncAccelerator.Tracing
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-import Network.HTTP.Client
+import Network.HTTP.Client hiding (Manager, newManager)
+import qualified Network.HTTP.Client as HTTP (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
@@ -50,7 +51,7 @@ data RemoteStorageConfig = RemoteStorageConfig
   -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable"), without trailing slash.
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
-  , rscManager :: Manager
+  , rscManager :: HTTP.Manager
   -- ^ Shared HTTP manager. Use 'newRemoteStorageConfig' to construct.
   }
 
@@ -69,7 +70,7 @@ instance Show RemoteStorageConfig where
 -- Strips any trailing slashes from the URL.
 newRemoteStorageConfig :: String -> FilePath -> IO RemoteStorageConfig
 newRemoteStorageConfig url dir = do
-  manager <- newManager tlsManagerSettings
+  manager <- HTTP.newManager tlsManagerSettings
   return
     RemoteStorageConfig
       { rscSrcUrl = dropTrailingSlashes url
@@ -117,7 +118,7 @@ downloadChunk tracer cfg chunk = do
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
   RemoteStorageTracer IO ->
-  Manager ->
+  HTTP.Manager ->
   RemoteStorageConfig ->
   ChunkNo ->
   FileType ->
