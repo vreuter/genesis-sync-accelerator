@@ -1,4 +1,5 @@
 -- TODO: Most of this code is copied from Ouroborus-consenses, copyright should belong to them.
+-- See: https://github.com/tweag/genesis-sync-accelerator/issues/22
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
