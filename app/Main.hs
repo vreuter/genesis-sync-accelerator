@@ -47,7 +47,8 @@ main = withStdTerminalHandles $ do
   pInfoConfig <- getTopLevelConfig configFile
   traceWith stdoutTracer $ "Running ImmDB server at " ++ printHost (addr, port)
   startResourceTracer stdoutTracer rtsFrequency
-  let mbRemoteConfig = fmap (`RemoteStorage.RemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
+  mbRemoteConfig <-
+    mapM (`RemoteStorage.newRemoteStorageConfig` remoteStorageCacheDir) remoteStorageSrcUrl
   absurd
     <$> Diffusion.run
       mbRemoteConfig
