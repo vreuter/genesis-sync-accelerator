@@ -11,6 +11,7 @@
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
   , fetchTipInfo
+  , newRemoteStorageConfig
   , RemoteStorageConfig (..)
   , RemoteTipInfo (..)
   , TraceRemoteStorageEvent (..)
@@ -46,11 +47,39 @@ import "contra-tracer" Control.Tracer
 -- | Configuration for the remote storage client.
 data RemoteStorageConfig = RemoteStorageConfig
   { rscSrcUrl :: String
-  -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable").
+  -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable"), without trailing slash.
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
+  , rscManager :: Manager
+  -- ^ Shared HTTP manager. Use 'newRemoteStorageConfig' to construct.
   }
-  deriving (Eq, Show)
+
+instance Eq RemoteStorageConfig where
+  a == b = rscSrcUrl a == rscSrcUrl b && rscDstDir a == rscDstDir b
+
+instance Show RemoteStorageConfig where
+  show cfg =
+    "RemoteStorageConfig { rscSrcUrl = "
+      ++ show (rscSrcUrl cfg)
+      ++ ", rscDstDir = "
+      ++ show (rscDstDir cfg)
+      ++ " }"
+
+-- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the config.
+-- Strips any trailing slashes from the URL.
+newRemoteStorageConfig :: String -> FilePath -> IO RemoteStorageConfig
+newRemoteStorageConfig url dir = do
+  manager <- newManager tlsManagerSettings
+  return
+    RemoteStorageConfig
+      { rscSrcUrl = dropTrailingSlashes url
+      , rscDstDir = dir
+      , rscManager = manager
+      }
+ where
+  dropTrailingSlashes s
+    | not (null s) && last s == '/' = dropTrailingSlashes (init s)
+    | otherwise = s
 
 data RemoteTipInfo = RemoteTipInfo
   { rtiSlot :: Word64
@@ -81,10 +110,9 @@ downloadChunk ::
   ChunkNo ->
   IO (Either TraceDownloadFailure [FilePath])
 downloadChunk tracer cfg chunk = do
-  manager <- newManager tlsManagerSettings
   createDirectoryIfMissing True (rscDstDir cfg)
   let fileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
-  sequence <$> mapM (downloadFile tracer manager cfg chunk) fileTypes
+  sequence <$> mapM (downloadFile tracer (rscManager cfg) cfg chunk) fileTypes
 
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
@@ -121,18 +149,16 @@ downloadFile eventTracer manager cfg chunk fileType = do
 fetchTipInfo ::
   RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Either TraceDownloadFailure RemoteTipInfo)
 fetchTipInfo tracer cfg = do
-  manager <- newManager tlsManagerSettings
   let tipFileName = "tip.json"
-      url = rscSrcUrl cfg
-      -- TODO: make this more robust (e.g., handle trailing slash in rscSrcUrl)
-      tipUrl = url ++ (if last url == '/' then "" else "/") ++ tipFileName
+      tipUrl = rscSrcUrl cfg ++ "/" ++ tipFileName
       processResponse r =
         case statusCode (responseStatus r) of
           200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
           status -> Left $ TraceDownloadError tipUrl status
   traceWith tracer $ TraceDownloadStart tipUrl
   request <- parseRequest tipUrl
-  result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
+  result <-
+    try (httpLbs request (rscManager cfg)) :: IO (Either SomeException (Response LBS.ByteString))
   return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
 
 instance FromJSON RemoteTipInfo where

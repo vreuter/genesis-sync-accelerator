@@ -28,7 +28,7 @@ import GenesisSyncAccelerator.OnDemand
   , newOnDemandRuntime
   , readOnDemandTip
   )
-import GenesisSyncAccelerator.RemoteStorage (RemoteStorageConfig (..), RemoteTipInfo (..))
+import GenesisSyncAccelerator.RemoteStorage (RemoteTipInfo (..), newRemoteStorageConfig)
 import GenesisSyncAccelerator.Types (StandardBlock)
 import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
@@ -265,9 +265,10 @@ mkFullConfig ::
   IO (OnDemandConfig IO StandardBlock HandleIO)
 mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) port = do
   codecConfig <- configCodec <$> getTopLevelConfig configFile
+  remoteCfg <- newRemoteStorageConfig ("http://localhost:" ++ show port) tmpdir
   return $
     OnDemandConfig
-      { odcRemote = mkRemoteStorageConfig tmpdir port
+      { odcRemote = remoteCfg
       , odcTracer = nullTracer
       , odcChunkInfo = podcChunkInfo
       , odcHasFS = fpToHasFS tmpdir
@@ -287,13 +288,6 @@ instance Arbitrary PartialOnDemandConfig where
         , podcIntegrityConstant = integrity
         , podcMaxCachedChunks = maxChunks
         }
-
-mkRemoteStorageConfig :: FilePath -> Int -> RemoteStorageConfig
-mkRemoteStorageConfig tmpdir port =
-  RemoteStorageConfig
-    { rscSrcUrl = "http://localhost:" ++ show port
-    , rscDstDir = tmpdir
-    }
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "on-demand-test"

@@ -8,10 +8,10 @@ import Data.Aeson (encode)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import qualified Data.List as List
 import GenesisSyncAccelerator.RemoteStorage
-  ( RemoteStorageConfig (..)
-  , RemoteTipInfo (..)
+  ( RemoteTipInfo (..)
   , TraceRemoteStorageEvent (..)
   , fetchTipInfo
+  , newRemoteStorageConfig
   )
 import Network.HTTP.Types (status200)
 import Network.Wai (responseLBS)
@@ -35,7 +35,7 @@ test_fetchTipInfo_parses_json = do
       app _ respond = respond $ responseLBS status200 [("Content-Type", "application/json")] (encode tipInfo)
 
   testWithApplication (pure app) $ \port -> do
-    let cfg = RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port, rscDstDir = "."}
+    cfg <- newRemoteStorageConfig ("http://localhost:" ++ show port) "."
     eventsRef <- newIORef []
     let tracer = Tracer $ \ev -> atomicModifyIORef' eventsRef (\evs -> (evs ++ [ev], ()))
     result <- fetchTipInfo tracer cfg
