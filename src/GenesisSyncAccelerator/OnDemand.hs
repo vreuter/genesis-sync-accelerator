@@ -117,6 +117,7 @@ data OnDemandConfig m blk h = OnDemandConfig
 
 data OnDemandRuntime m blk h = OnDemandRuntime
   { odrConfig :: OnDemandConfig m blk h
+  , odrEnv :: Remote.RemoteStorageEnv
   , odrState :: StrictTVar m (OnDemandState blk)
   }
 
@@ -127,9 +128,12 @@ newOnDemandRuntime ::
   OnDemandConfig m blk h ->
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg = do
-  tip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) (odcRemote cfg) >>= procTip . fmap tipFromRemote
+  env <-
+    liftIO $
+      Remote.newRemoteStorageEnv (Remote.rscSrcUrl (odcRemote cfg)) (Remote.rscDstDir (odcRemote cfg))
+  tip <- liftIO $ Remote.fetchTipInfo (odcTracer cfg) env >>= procTip . fmap tipFromRemote
   stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
-  pure $ OnDemandRuntime cfg stateVar
+  pure $ OnDemandRuntime cfg env stateVar
  where
   procTip = either (\e -> traceWith (odcTracer cfg) (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
@@ -174,8 +178,8 @@ onDemandIteratorForRange ::
   StreamFrom blk ->
   StreamTo blk ->
   m (Iterator m blk b)
-onDemandIteratorForRange OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from to =
-  mkOnDemandIterator cfg odrState component from (Just to) (getChunksInRange odcChunkInfo from to)
+onDemandIteratorForRange odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcChunkInfo}} component from to =
+  mkOnDemandIterator odr component from (Just to) (getChunksInRange odcChunkInfo from to)
 
 onDemandIteratorFrom ::
   forall m blk h b.
@@ -191,8 +195,8 @@ onDemandIteratorFrom ::
   BlockComponent blk b ->
   StreamFrom blk ->
   m (Iterator m blk b)
-onDemandIteratorFrom OnDemandRuntime{odrConfig = cfg@OnDemandConfig{odcChunkInfo}, odrState} component from =
-  mkOnDemandIterator cfg odrState component from Nothing (chunksFrom odcChunkInfo from)
+onDemandIteratorFrom odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcChunkInfo}} component from =
+  mkOnDemandIterator odr component from Nothing (chunksFrom odcChunkInfo from)
 
 readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
 readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
@@ -208,104 +212,115 @@ mkOnDemandIterator ::
   , ReconstructNestedCtxt Header blk
   , ConvertRawHash blk
   ) =>
-  OnDemandConfig m blk h ->
-  StrictTVar m (OnDemandState blk) ->
+  OnDemandRuntime m blk h ->
   BlockComponent blk b ->
   StreamFrom blk ->
   Maybe (StreamTo blk) ->
   [ChunkNo] ->
   m (Iterator m blk b)
-mkOnDemandIterator cfg@OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity} stateVar component from to chunks = do
-  varChunks <- newTVarIO chunks
-  varCurrentIt <- newTVarIO Nothing
+mkOnDemandIterator
+  odr@OnDemandRuntime
+    { odrConfig = OnDemandConfig{odcHasFS, odcChunkInfo, odcCodecConfig, odcCheckIntegrity}
+    }
+  component
+  from
+  to
+  chunks = do
+    varChunks <- newTVarIO chunks
+    varCurrentIt <- newTVarIO Nothing
 
-  let
-    next = do
-      current <- readTVarIO varCurrentIt
-      case current of
-        Just it -> do
-          res <- iteratorNext it
-          case res of
-            IteratorResult b -> return (IteratorResult b)
-            IteratorExhausted -> do
-              iteratorClose it
-              atomically $ writeTVar varCurrentIt Nothing
-              next -- Transition to next chunk
-        Nothing -> do
-          cs <- readTVarIO varChunks
-          case cs of
-            [] -> return IteratorExhausted
-            (c : rest) -> do
-              atomically $ writeTVar varChunks rest
-              -- Download only the current chunk before serving it
-              ok <- ensureChunks cfg stateVar [c]
-              if not ok
-                then return IteratorExhausted
-                else do
-                  it <-
-                    mkRawChunkIterator
-                      odcHasFS
-                      odcChunkInfo
-                      odcCodecConfig
-                      odcCheckIntegrity
-                      component
-                      from
-                      to
-                      [c]
-                  atomically $ writeTVar varCurrentIt (Just it)
-                  next -- Transition to next chunk
-    hasNext =
-      readTVar varCurrentIt >>= \case
-        Just it -> iteratorHasNext it
-        Nothing -> return Nothing
+    let
+      next = do
+        current <- readTVarIO varCurrentIt
+        case current of
+          Just it -> do
+            res <- iteratorNext it
+            case res of
+              IteratorResult b -> return (IteratorResult b)
+              IteratorExhausted -> do
+                iteratorClose it
+                atomically $ writeTVar varCurrentIt Nothing
+                next -- Transition to next chunk
+          Nothing -> do
+            cs <- readTVarIO varChunks
+            case cs of
+              [] -> return IteratorExhausted
+              (c : rest) -> do
+                atomically $ writeTVar varChunks rest
+                -- Download only the current chunk before serving it
+                ok <- ensureChunks odr [c]
+                if not ok
+                  then return IteratorExhausted
+                  else do
+                    it <-
+                      mkRawChunkIterator
+                        odcHasFS
+                        odcChunkInfo
+                        odcCodecConfig
+                        odcCheckIntegrity
+                        component
+                        from
+                        to
+                        [c]
+                    atomically $ writeTVar varCurrentIt (Just it)
+                    next -- Transition to next chunk
+      hasNext =
+        readTVar varCurrentIt >>= \case
+          Just it -> iteratorHasNext it
+          Nothing -> return Nothing
 
-    close =
-      readTVarIO varCurrentIt >>= \case
-        Just it -> iteratorClose it
-        Nothing -> return ()
+      close =
+        readTVarIO varCurrentIt >>= \case
+          Just it -> iteratorClose it
+          Nothing -> return ()
 
-  return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
+    return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
 
 -- | Ensures that the requested chunks are present on disk, downloading them if necessary.
 -- Implements an LRU eviction policy to maintain the 'odcMaxCachedChunks' limit.
 ensureChunks ::
   forall m blk h.
   (IOLike m, MonadIO m) =>
-  OnDemandConfig m blk h ->
-  StrictTVar m (OnDemandState blk) ->
+  OnDemandRuntime m blk h ->
   [ChunkNo] ->
   m Bool
-ensureChunks OnDemandConfig{odcRemote, odcTracer, odcHasFS, odcMaxCachedChunks} stateVar requestedChunks = do
-  -- 1. Identify and download missing chunks
-  state <- readTVarIO stateVar
-  let missingChunks = filter (`Set.notMember` odsCachedChunks state) requestedChunks
+ensureChunks
+  OnDemandRuntime
+    { odrConfig = OnDemandConfig{odcTracer, odcHasFS, odcMaxCachedChunks}
+    , odrEnv
+    , odrState = stateVar
+    }
+  requestedChunks = do
+    -- 1. Identify and download missing chunks
+    state <- readTVarIO stateVar
+    let missingChunks = filter (`Set.notMember` odsCachedChunks state) requestedChunks
 
-  downloadResult <- liftIO $ mapM (Remote.downloadChunk odcTracer odcRemote) missingChunks
+    downloadResult <- liftIO $ mapM (Remote.downloadChunk odcTracer odrEnv) missingChunks
 
-  case sequence_ downloadResult of
-    Left _ -> return False
-    Right _ -> do
-      -- 2. Update usage order and identify chunks to prune
-      toPrune <- atomically $ do
-        curr <- readTVar stateVar
-        let
-          -- Move requested chunks to the head (most recently used)
-          newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
-          newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
+    case sequence_ downloadResult of
+      Left _ -> return False
+      Right _ -> do
+        -- 2. Update usage order and identify chunks to prune
+        toPrune <- atomically $ do
+          curr <- readTVar stateVar
+          let
+            -- Move requested chunks to the head (most recently used)
+            newUsage = requestedChunks ++ foldr delete (odsUsageOrder curr) requestedChunks
+            newCached = Set.union (odsCachedChunks curr) (Set.fromList requestedChunks)
 
-          -- Eviction: if we exceed the limit, prune the least recently used chunks.
-          -- We must keep all chunks currently requested to ensure iterator safety.
-          (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
-          updatedCached = Set.difference newCached (Set.fromList prune)
+            -- Eviction: if we exceed the limit, prune the least recently used chunks.
+            -- We must keep all chunks currently requested to ensure iterator safety.
+            (stay, prune) = splitAt (max odcMaxCachedChunks (length requestedChunks)) newUsage
+            updatedCached = Set.difference newCached (Set.fromList prune)
 
-        writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = stay}
-        return prune
+          writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = stay}
+          return prune
 
-      -- 3. Physically delete pruned chunks from disk
-      unless (null toPrune) $
-        mapM_ (deleteChunkFiles odcHasFS) toPrune
+        -- 3. Physically delete pruned chunks from disk
+        unless (null toPrune) $
+          mapM_ (deleteChunkFiles odcHasFS) toPrune
 
-      return True
+        return True
 
 -- | Deletes the triad of files associated with a chunk.
 deleteChunkFiles :: IOLike m => HasFS m h -> ChunkNo -> m ()

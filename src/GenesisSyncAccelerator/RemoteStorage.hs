@@ -11,8 +11,9 @@
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
   , fetchTipInfo
-  , newRemoteStorageConfig
+  , newRemoteStorageEnv
   , RemoteStorageConfig (..)
+  , RemoteStorageEnv (..)
   , RemoteTipInfo (..)
   , TraceRemoteStorageEvent (..)
   , RemoteStorageTracer
@@ -51,31 +52,29 @@ data RemoteStorageConfig = RemoteStorageConfig
   -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable"), without trailing slash.
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
-  , rscManager :: HTTP.Manager
-  -- ^ Shared HTTP manager. Use 'newRemoteStorageConfig' to construct.
+  }
+  deriving (Eq, Show)
+
+-- | Runtime environment for the remote storage client, pairing a 'RemoteStorageConfig'
+-- with a shared HTTP 'Manager'. Use 'newRemoteStorageEnv' to construct.
+data RemoteStorageEnv = RemoteStorageEnv
+  { rseConfig :: RemoteStorageConfig
+  , rseManager :: HTTP.Manager
   }
 
-instance Eq RemoteStorageConfig where
-  a == b = rscSrcUrl a == rscSrcUrl b && rscDstDir a == rscDstDir b
-
-instance Show RemoteStorageConfig where
-  show cfg =
-    "RemoteStorageConfig { rscSrcUrl = "
-      ++ show (rscSrcUrl cfg)
-      ++ ", rscDstDir = "
-      ++ show (rscDstDir cfg)
-      ++ " }"
-
--- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the config.
+-- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the env.
 -- Strips any trailing slashes from the URL.
-newRemoteStorageConfig :: String -> FilePath -> IO RemoteStorageConfig
-newRemoteStorageConfig url dir = do
+newRemoteStorageEnv :: String -> FilePath -> IO RemoteStorageEnv
+newRemoteStorageEnv url dir = do
   manager <- HTTP.newManager tlsManagerSettings
   return
-    RemoteStorageConfig
-      { rscSrcUrl = dropTrailingSlashes url
-      , rscDstDir = dir
-      , rscManager = manager
+    RemoteStorageEnv
+      { rseConfig =
+          RemoteStorageConfig
+            { rscSrcUrl = dropTrailingSlashes url
+            , rscDstDir = dir
+            }
+      , rseManager = manager
       }
  where
   dropTrailingSlashes s
@@ -107,13 +106,14 @@ toSuffix = \case
 -- This function fetches the @.chunk@, @.primary@, and @.secondary@ files.
 downloadChunk ::
   RemoteStorageTracer IO ->
-  RemoteStorageConfig ->
+  RemoteStorageEnv ->
   ChunkNo ->
   IO (Either TraceDownloadFailure [FilePath])
-downloadChunk tracer cfg chunk = do
+downloadChunk tracer env chunk = do
+  let cfg = rseConfig env
   createDirectoryIfMissing True (rscDstDir cfg)
   let fileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
-  sequence <$> mapM (downloadFile tracer (rscManager cfg) cfg chunk) fileTypes
+  sequence <$> mapM (downloadFile tracer (rseManager env) cfg chunk) fileTypes
 
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
@@ -148,9 +148,10 @@ downloadFile eventTracer manager cfg chunk fileType = do
   try (httpLbs request manager) >>= either traceEx processResponse
 
 fetchTipInfo ::
-  RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Either TraceDownloadFailure RemoteTipInfo)
-fetchTipInfo tracer cfg = do
-  let tipFileName = "tip.json"
+  RemoteStorageTracer IO -> RemoteStorageEnv -> IO (Either TraceDownloadFailure RemoteTipInfo)
+fetchTipInfo tracer env = do
+  let cfg = rseConfig env
+      tipFileName = "tip.json"
       tipUrl = rscSrcUrl cfg ++ "/" ++ tipFileName
       processResponse r =
         case statusCode (responseStatus r) of
@@ -159,7 +160,7 @@ fetchTipInfo tracer cfg = do
   traceWith tracer $ TraceDownloadStart tipUrl
   request <- parseRequest tipUrl
   result <-
-    try (httpLbs request (rscManager cfg)) :: IO (Either SomeException (Response LBS.ByteString))
+    try (httpLbs request (rseManager env)) :: IO (Either SomeException (Response LBS.ByteString))
   return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
 
 instance FromJSON RemoteTipInfo where

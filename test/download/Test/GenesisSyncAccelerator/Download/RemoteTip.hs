@@ -11,7 +11,7 @@ import GenesisSyncAccelerator.RemoteStorage
   ( RemoteTipInfo (..)
   , TraceRemoteStorageEvent (..)
   , fetchTipInfo
-  , newRemoteStorageConfig
+  , newRemoteStorageEnv
   )
 import Network.HTTP.Types (status200)
 import Network.Wai (responseLBS)
@@ -35,10 +35,10 @@ test_fetchTipInfo_parses_json = do
       app _ respond = respond $ responseLBS status200 [("Content-Type", "application/json")] (encode tipInfo)
 
   testWithApplication (pure app) $ \port -> do
-    cfg <- newRemoteStorageConfig ("http://localhost:" ++ show port) "."
+    env <- newRemoteStorageEnv ("http://localhost:" ++ show port) "."
     eventsRef <- newIORef []
     let tracer = Tracer $ \ev -> atomicModifyIORef' eventsRef (\evs -> (evs ++ [ev], ()))
-    result <- fetchTipInfo tracer cfg
+    result <- fetchTipInfo tracer env
     assertEqual "Fetched tip info matches served JSON" (Right tipInfo) result
 
     events <- readIORef eventsRef
