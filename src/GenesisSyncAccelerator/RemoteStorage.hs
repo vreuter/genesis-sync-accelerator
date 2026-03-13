@@ -11,7 +11,9 @@
 module GenesisSyncAccelerator.RemoteStorage
   ( downloadChunk
   , fetchTipInfo
+  , newRemoteStorageEnv
   , RemoteStorageConfig (..)
+  , RemoteStorageEnv (..)
   , RemoteTipInfo (..)
   , TraceRemoteStorageEvent (..)
   , RemoteStorageTracer
@@ -35,7 +37,8 @@ import GenesisSyncAccelerator.Tracing
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-import Network.HTTP.Client
+import Network.HTTP.Client hiding (Manager, newManager)
+import qualified Network.HTTP.Client as HTTP (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
@@ -46,11 +49,37 @@ import "contra-tracer" Control.Tracer
 -- | Configuration for the remote storage client.
 data RemoteStorageConfig = RemoteStorageConfig
   { rscSrcUrl :: String
-  -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable").
+  -- ^ The root URL of the CDN (e.g., "https://cdn.cardano.org/mainnet/immutable"), without trailing slash.
   , rscDstDir :: FilePath
   -- ^ Local directory where the downloaded chunks should be stored.
   }
   deriving (Eq, Show)
+
+-- | Runtime environment for the remote storage client, pairing a 'RemoteStorageConfig'
+-- with a shared HTTP 'Manager'. Use 'newRemoteStorageEnv' to construct.
+data RemoteStorageEnv = RemoteStorageEnv
+  { rseConfig :: RemoteStorageConfig
+  , rseManager :: HTTP.Manager
+  }
+
+-- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the env.
+-- Strips any trailing slashes from the URL.
+newRemoteStorageEnv :: String -> FilePath -> IO RemoteStorageEnv
+newRemoteStorageEnv url dir = do
+  manager <- HTTP.newManager tlsManagerSettings
+  return
+    RemoteStorageEnv
+      { rseConfig =
+          RemoteStorageConfig
+            { rscSrcUrl = dropTrailingSlashes url
+            , rscDstDir = dir
+            }
+      , rseManager = manager
+      }
+ where
+  dropTrailingSlashes s
+    | not (null s) && last s == '/' = dropTrailingSlashes (init s)
+    | otherwise = s
 
 data RemoteTipInfo = RemoteTipInfo
   { rtiSlot :: Word64
@@ -77,19 +106,19 @@ toSuffix = \case
 -- This function fetches the @.chunk@, @.primary@, and @.secondary@ files.
 downloadChunk ::
   RemoteStorageTracer IO ->
-  RemoteStorageConfig ->
+  RemoteStorageEnv ->
   ChunkNo ->
   IO (Either TraceDownloadFailure [FilePath])
-downloadChunk tracer cfg chunk = do
-  manager <- newManager tlsManagerSettings
+downloadChunk tracer env chunk = do
+  let cfg = rseConfig env
   createDirectoryIfMissing True (rscDstDir cfg)
   let fileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
-  sequence <$> mapM (downloadFile tracer manager cfg chunk) fileTypes
+  sequence <$> mapM (downloadFile tracer (rseManager env) cfg chunk) fileTypes
 
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
   RemoteStorageTracer IO ->
-  Manager ->
+  HTTP.Manager ->
   RemoteStorageConfig ->
   ChunkNo ->
   FileType ->
@@ -119,20 +148,19 @@ downloadFile eventTracer manager cfg chunk fileType = do
   try (httpLbs request manager) >>= either traceEx processResponse
 
 fetchTipInfo ::
-  RemoteStorageTracer IO -> RemoteStorageConfig -> IO (Either TraceDownloadFailure RemoteTipInfo)
-fetchTipInfo tracer cfg = do
-  manager <- newManager tlsManagerSettings
-  let tipFileName = "tip.json"
-      url = rscSrcUrl cfg
-      -- TODO: make this more robust (e.g., handle trailing slash in rscSrcUrl)
-      tipUrl = url ++ (if last url == '/' then "" else "/") ++ tipFileName
+  RemoteStorageTracer IO -> RemoteStorageEnv -> IO (Either TraceDownloadFailure RemoteTipInfo)
+fetchTipInfo tracer env = do
+  let cfg = rseConfig env
+      tipFileName = "tip.json"
+      tipUrl = rscSrcUrl cfg ++ "/" ++ tipFileName
       processResponse r =
         case statusCode (responseStatus r) of
           200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
           status -> Left $ TraceDownloadError tipUrl status
   traceWith tracer $ TraceDownloadStart tipUrl
   request <- parseRequest tipUrl
-  result <- try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString))
+  result <-
+    try (httpLbs request (rseManager env)) :: IO (Either SomeException (Response LBS.ByteString))
   return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
 
 instance FromJSON RemoteTipInfo where

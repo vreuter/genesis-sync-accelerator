@@ -147,12 +147,12 @@ test_ensureChunksLRU = do
         runtime <- newOnDemandRuntime config
 
         -- Request chunk 0
-        _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 0]
+        _ <- ensureChunks runtime [ChunkNo 0]
         state0 <- readTVarIO (odrState runtime)
         assertEqual "Cache contains chunk 0" (Set.singleton (ChunkNo 0)) (odsCachedChunks state0)
 
         -- Request chunk 1
-        _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 1]
+        _ <- ensureChunks runtime [ChunkNo 1]
         state1 <- readTVarIO (odrState runtime)
         assertEqual
           "Cache contains chunks 0 and 1"
@@ -160,7 +160,7 @@ test_ensureChunksLRU = do
           (odsCachedChunks state1)
 
         -- Request chunk 2
-        _ <- ensureChunks (odrConfig runtime) (odrState runtime) [ChunkNo 2]
+        _ <- ensureChunks runtime [ChunkNo 2]
         state2 <- readTVarIO (odrState runtime)
         assertEqual
           "Cache contains chunks 1 and 2"
@@ -267,7 +267,7 @@ mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) p
   codecConfig <- configCodec <$> getTopLevelConfig configFile
   return $
     OnDemandConfig
-      { odcRemote = mkRemoteStorageConfig tmpdir port
+      { odcRemote = RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port, rscDstDir = tmpdir}
       , odcTracer = nullTracer
       , odcChunkInfo = podcChunkInfo
       , odcHasFS = fpToHasFS tmpdir
@@ -287,13 +287,6 @@ instance Arbitrary PartialOnDemandConfig where
         , podcIntegrityConstant = integrity
         , podcMaxCachedChunks = maxChunks
         }
-
-mkRemoteStorageConfig :: FilePath -> Int -> RemoteStorageConfig
-mkRemoteStorageConfig tmpdir port =
-  RemoteStorageConfig
-    { rscSrcUrl = "http://localhost:" ++ show port
-    , rscDstDir = tmpdir
-    }
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
 withTemp = Temp.withSystemTempDirectory "on-demand-test"

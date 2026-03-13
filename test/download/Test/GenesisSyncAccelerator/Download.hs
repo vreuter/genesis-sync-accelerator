@@ -17,11 +17,11 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
 import GenesisSyncAccelerator.RemoteStorage
   ( FileType (..)
-  , RemoteStorageConfig (..)
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   , downloadChunk
   , getFileName
+  , newRemoteStorageEnv
   )
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (testWithApplication)
@@ -240,9 +240,8 @@ unsafeDownloadChunk ::
 unsafeDownloadChunk tracer TestFolderSetup{..} targetChunk =
   testWithApplication (pure $ staticApp $ defaultFileServerSettings serverTmpdir) $
     \port -> do
-      let storageConfig =
-            RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port ++ "/", rscDstDir = clientTmpdir}
-      either (error . show) (const ()) <$> downloadChunk tracer storageConfig targetChunk
+      storageEnv <- newRemoteStorageEnv ("http://localhost:" ++ show port) clientTmpdir
+      either (error . show) (const ()) <$> downloadChunk tracer storageEnv targetChunk
 
 -- Within the given folder, create the filepaths specified by the given "kernel"s.
 setupFilesAndFolders :: FilePath -> [FileKernel] -> IO TestFolderSetup
