@@ -37,6 +37,7 @@ import Control.Monad (forM, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
+import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
@@ -369,7 +370,7 @@ mkOnDemandIterator
       hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
 
       close = do
-        readTVarIO varCurrentIt >>= traverse iteratorClose
+        readTVarIO varCurrentIt >>= traverse_ iteratorClose
         -- Clean up: unpin the tracked prefetch window.
         cleanupOnError
 
