@@ -440,21 +440,21 @@ registerInCache ::
   m ()
 registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCount numChunks} PrefetchState{psJobs} stateVar chunk = do
   pj <- liftIO $ takeMVar psJobs
-  toPrune <- atomically $ do
-    let pinned = pjPinnedChunks pj
-    curr <- readTVar stateVar
-    let
-      newUsage = chunk : delete chunk (odsUsageOrder curr)
-      newCached = Set.insert chunk (odsCachedChunks curr)
-      -- Split into chunks to keep vs candidates for eviction
-      (stay, candidates) = genericSplitAt numChunks newUsage
-      -- Only evict unpinned chunks
-      (keepPinned, prune) = partition (`Map.member` pinned) candidates
-      finalUsage = stay ++ keepPinned
-      updatedCached = Set.difference newCached (Set.fromList prune)
-    writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = finalUsage}
-    return prune
   ( do
+      toPrune <- atomically $ do
+        let pinned = pjPinnedChunks pj
+        curr <- readTVar stateVar
+        let
+          newUsage = chunk : delete chunk (odsUsageOrder curr)
+          newCached = Set.insert chunk (odsCachedChunks curr)
+          -- Split into chunks to keep vs candidates for eviction
+          (stay, candidates) = genericSplitAt numChunks newUsage
+          -- Only evict unpinned chunks
+          (keepPinned, prune) = partition (`Map.member` pinned) candidates
+          finalUsage = stay ++ keepPinned
+          updatedCached = Set.difference newCached (Set.fromList prune)
+        writeTVar stateVar curr{odsCachedChunks = updatedCached, odsUsageOrder = finalUsage}
+        return prune
       unless (null toPrune) $ mapM_ (deleteChunkFiles odcHasFS) toPrune
       liftIO $ putMVar psJobs pj
     )
