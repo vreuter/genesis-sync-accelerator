@@ -1,3 +1,4 @@
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
@@ -24,6 +25,7 @@ module GenesisSyncAccelerator.RemoteStorage
   ) where
 
 import Control.Exception (SomeException, try)
+import Control.Monad.Catch (MonadThrow)
 import Data.Aeson (FromJSON (..), ToJSON (..), eitherDecode, object, withObject, (.:), (.=))
 import qualified Data.Bifunctor as Bifunctor
 import qualified Data.ByteString as BS
@@ -129,24 +131,25 @@ downloadFile eventTracer env chunk fileType = do
           status -> traceFail $ TraceDownloadError filename status
       traceFail f = traceWith (contramap TraceDownloadFailure eventTracer) f >> pure (Left f)
   -- Construct request
-  request <- parseRequest (rscSrcUrl cfg ++ "/" ++ filename)
+  request <- getRequest cfg filename
   -- Perform the download
   traceWith eventTracer $ TraceDownloadStart filename
   (try (httpLbs request manager) :: IO (Either SomeException (Response LBS.ByteString)))
     >>= either (traceFail . TraceDownloadException filename . show) processResponse
 
+getRequest :: MonadThrow m => RemoteStorageConfig -> String -> m Request
+getRequest cfg name = parseRequest (rscSrcUrl cfg ++ "/" ++ name)
+
 fetchTipInfo ::
   RemoteStorageTracer IO -> RemoteStorageEnv -> IO (Either TraceDownloadFailure RemoteTipInfo)
 fetchTipInfo tracer env = do
-  let cfg = rseConfig env
-      tipFileName = "tip.json"
-      tipUrl = rscSrcUrl cfg ++ "/" ++ tipFileName
+  request <- getRequest (rseConfig env) "tip.json"
+  let tipUrl = show $ getUri request
       processResponse r =
         case statusCode (responseStatus r) of
           200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
           status -> Left $ TraceDownloadError tipUrl status
   traceWith tracer $ TraceDownloadStart tipUrl
-  request <- parseRequest tipUrl
   result <-
     try (httpLbs request (rseManager env)) :: IO (Either SomeException (Response LBS.ByteString))
   return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
