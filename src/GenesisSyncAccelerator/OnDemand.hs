@@ -338,17 +338,16 @@ mkOnDemandIterator
               (c : rest) -> do
                 atomically $ writeTVar varChunks rest
 
-                -- Compute and set new active prefetch window.
-                let newWindow = c : genericTake numPrefetch rest
-                updatePrefetchWindow newWindow
-
-                -- Start background prefetches for uncached chunks in the window
-                cached <- odsCachedChunks <$> readTVarIO odrState
-                let uncached = filter (`Set.notMember` cached) newWindow
-                liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
-
                 flip onException cleanupOnError $ do
-                  -- Download current chunk / wait of download to finish if needed
+                  -- Compute and set new active prefetch window.
+                  let newWindow = c : genericTake numPrefetch rest
+                  updatePrefetchWindow newWindow
+
+                  -- Start background prefetches for uncached chunks in the window
+                  cached <- odsCachedChunks <$> readTVarIO stateVar
+                  let uncached = filter (`Set.notMember` cached) newWindow
+                  liftIO $ prefetchChunks odcTracer odcRemote prefetchState uncached
+
                   ok <- ensureChunkAvailable c
                   if not ok
                     then do
