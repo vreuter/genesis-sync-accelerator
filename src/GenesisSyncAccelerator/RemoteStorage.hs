@@ -37,7 +37,7 @@ import GenesisSyncAccelerator.Tracing
   , TraceDownloadFailure (..)
   , TraceRemoteStorageEvent (..)
   )
-import Network.HTTP.Client hiding (Manager, newManager)
+import Network.HTTP.Client hiding (Manager)
 import qualified Network.HTTP.Client as HTTP (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
@@ -55,13 +55,6 @@ data RemoteStorageConfig = RemoteStorageConfig
   }
   deriving (Eq, Show)
 
--- | Runtime environment for the remote storage client, pairing a 'RemoteStorageConfig'
--- with a shared HTTP 'Manager'. Use 'newRemoteStorageEnv' to construct.
-data RemoteStorageEnv = RemoteStorageEnv
-  { rseConfig :: RemoteStorageConfig
-  , rseManager :: HTTP.Manager
-  }
-
 -- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the env.
 -- Strips any trailing slashes from the URL.
 newRemoteStorageEnv :: String -> FilePath -> IO RemoteStorageEnv
@@ -73,6 +66,13 @@ newRemoteStorageEnv url dir =
   dropTrailingSlashes s
     | not (null s) && last s == '/' = dropTrailingSlashes (init s)
     | otherwise = s
+
+-- | Runtime environment for the remote storage client, pairing a 'RemoteStorageConfig'
+-- with a shared HTTP 'Manager'.
+data RemoteStorageEnv = RemoteStorageEnv
+  { rseConfig :: RemoteStorageConfig
+  , rseManager :: HTTP.Manager
+  }
 
 data RemoteTipInfo = RemoteTipInfo
   { rtiSlot :: Word64
@@ -103,21 +103,21 @@ downloadChunk ::
   ChunkNo ->
   IO (Either TraceDownloadFailure [FilePath])
 downloadChunk tracer env chunk = do
-  let cfg = rseConfig env
-  createDirectoryIfMissing True (rscDstDir cfg)
+  createDirectoryIfMissing True $ rscDstDir $ rseConfig env
   let fileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
-  sequence <$> mapM (downloadFile tracer (rseManager env) cfg chunk) fileTypes
+  sequence <$> mapM (downloadFile tracer env chunk) fileTypes
 
 -- | Internal helper to download a single file using the provided HTTP 'Manager'.
 downloadFile ::
   RemoteStorageTracer IO ->
-  HTTP.Manager ->
-  RemoteStorageConfig ->
+  RemoteStorageEnv ->
   ChunkNo ->
   FileType ->
   IO (Either TraceDownloadFailure FilePath)
-downloadFile eventTracer manager cfg chunk fileType = do
-  let filename = Text.unpack $ getFileName fileType chunk
+downloadFile eventTracer env chunk fileType = do
+  let cfg = rseConfig env
+      manager = rseManager env
+      filename = Text.unpack $ getFileName fileType chunk
       localPath = rscDstDir cfg </> filename
       processResponse r =
         case statusCode (responseStatus r) of
