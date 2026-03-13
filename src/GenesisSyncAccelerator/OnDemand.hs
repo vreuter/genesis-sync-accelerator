@@ -369,7 +369,7 @@ mkOnDemandIterator
       hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
 
       close = do
-        readTVarIO varCurrentIt >>= maybe (return ()) iteratorClose
+        readTVarIO varCurrentIt >>= traverse iteratorClose
         -- Clean up: unpin the tracked prefetch window.
         cleanupOnError
 
