@@ -165,6 +165,7 @@ optsParser =
               [ long "max-cached-chunks"
               , help "Maximum number of chunks to keep in cache"
               , value 10
+              , showDefault
               ]
           )
     prefetchAhead <-
@@ -175,6 +176,7 @@ optsParser =
               [ long "prefetch-ahead"
               , help "Number of chunks to prefetch ahead of current position"
               , value 3
+              , showDefault
               ]
           )
     pure
