@@ -65,18 +65,11 @@ data RemoteStorageEnv = RemoteStorageEnv
 -- | Smart constructor that creates a shared HTTP 'Manager' for the lifetime of the env.
 -- Strips any trailing slashes from the URL.
 newRemoteStorageEnv :: String -> FilePath -> IO RemoteStorageEnv
-newRemoteStorageEnv url dir = do
-  manager <- HTTP.newManager tlsManagerSettings
-  return
-    RemoteStorageEnv
-      { rseConfig =
-          RemoteStorageConfig
-            { rscSrcUrl = dropTrailingSlashes url
-            , rscDstDir = dir
-            }
-      , rseManager = manager
-      }
+newRemoteStorageEnv url dir =
+  (\mgr -> RemoteStorageEnv{rseConfig = cfg, rseManager = mgr})
+    <$> HTTP.newManager tlsManagerSettings
  where
+  cfg = RemoteStorageConfig{rscSrcUrl = dropTrailingSlashes url, rscDstDir = dir}
   dropTrailingSlashes s
     | not (null s) && last s == '/' = dropTrailingSlashes (init s)
     | otherwise = s
