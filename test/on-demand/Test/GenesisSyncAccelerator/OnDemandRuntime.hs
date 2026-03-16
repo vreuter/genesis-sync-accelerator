@@ -189,8 +189,8 @@ test_ensureChunksLRU = do
             exists <- doesFileExist (cacheDir </> fn)
             assertEqual ("Chunk " ++ show n ++ " file " ++ fn ++ " present") True exists
 
-test_newOnDemandRuntimeFetchesRemoteTip :: PartialOnDemandConfig -> Property
-test_newOnDemandRuntimeFetchesRemoteTip partialConfig =
+prop_newOnDemandRuntimeFetchesRemoteTip :: PartialOnDemandConfig -> Property
+prop_newOnDemandRuntimeFetchesRemoteTip partialConfig =
   ioQuickly $ do
     let rawSlotNo = 1234
         rawBlockNo = 567
@@ -332,5 +332,5 @@ tests =
         test_ensureChunksLRU
     , testProperty
         "newOnDemandRuntime fetches tip from remote"
-        test_newOnDemandRuntimeFetchesRemoteTip
+        prop_newOnDemandRuntimeFetchesRemoteTip
     ]
