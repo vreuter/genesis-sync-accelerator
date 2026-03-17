@@ -1,6 +1,7 @@
 module Main (main) where
 
-import qualified Test.GenesisSyncAccelerator.OnDemandRuntime
+import qualified Test.GenesisSyncAccelerator.OnDemand.EnsureChunks
+import qualified Test.GenesisSyncAccelerator.OnDemand.Runtime
 import Test.Tasty (TestTree, defaultMain, testGroup)
 
 main :: IO ()
@@ -10,5 +11,6 @@ tests :: TestTree
 tests =
   testGroup
     "on-demand"
-    [ Test.GenesisSyncAccelerator.OnDemandRuntime.tests
+    [ Test.GenesisSyncAccelerator.OnDemand.EnsureChunks.tests
+    , Test.GenesisSyncAccelerator.OnDemand.Runtime.tests
     ]

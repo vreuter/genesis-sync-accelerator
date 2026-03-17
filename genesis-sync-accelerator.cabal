@@ -158,10 +158,14 @@ library gsa-testlib
   hs-source-dirs: src/gsa-testlib
   exposed-modules:
     Test.GenesisSyncAccelerator.Orphans
+    Test.GenesisSyncAccelerator.Types
     Test.GenesisSyncAccelerator.Utilities
 
   build-depends:
     QuickCheck,
+    contra-tracer,
+    filepath,
+    fs-api,
     genesis-sync-accelerator,
     ouroboros-consensus,
     text,
@@ -235,7 +239,6 @@ test-suite on-demand-tests
     aeson,
     bytestring,
     containers,
-    contra-tracer,
     directory,
     exceptions,
     filepath,
@@ -255,4 +258,5 @@ test-suite on-demand-tests
 
   other-modules:
     Paths_genesis_sync_accelerator
-    Test.GenesisSyncAccelerator.OnDemandRuntime
+    Test.GenesisSyncAccelerator.OnDemand.EnsureChunks
+    Test.GenesisSyncAccelerator.OnDemand.Runtime

@@ -1,3 +1,6 @@
+{-# LANGUAGE PackageImports #-}
+{-# LANGUAGE RecordWildCards #-}
+
 -- | Utilities for test suites
 module Test.GenesisSyncAccelerator.Utilities
   ( allFileTypes
@@ -5,12 +8,22 @@ module Test.GenesisSyncAccelerator.Utilities
   , genSeveralChunkNumbers
   , getAllFilenamesForChunk
   , getCurrentFilenamesForChunk
+  , mkFullConfig
+  , topLevelConfigFileRelativePath
   ) where
 
 import qualified Data.Text as Text
-import GenesisSyncAccelerator.RemoteStorage (FileType (..), getFileName)
+import GenesisSyncAccelerator.OnDemand (OnDemandConfig (..))
+import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
+import GenesisSyncAccelerator.Types (StandardBlock)
+import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
+import Ouroboros.Consensus.Config (configCodec)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
+import System.FS.IO (HandleIO)
+import System.FilePath ((</>))
+import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
 import Test.QuickCheck
+import "contra-tracer" Control.Tracer (nullTracer)
 
 -- | An exhaustive list of all file types possibly associated with a chunk.
 allFileTypes :: [FileType]
@@ -38,3 +51,26 @@ getCurrentFilenamesForChunk cn = getFilenamesForChunk cn currentFileTypes
 -- | For the given chunk, for the given file types, the the expected file name.
 getFilenamesForChunk :: ChunkNo -> [FileType] -> [String]
 getFilenamesForChunk cn = map (\ft -> Text.unpack $ getFileName ft cn)
+
+mkFullConfig ::
+  PartialOnDemandConfig ->
+  ConfigFile ->
+  TmpDir ->
+  Int ->
+  IO (OnDemandConfig IO StandardBlock HandleIO)
+mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) port = do
+  codecConfig <- configCodec <$> getTopLevelConfig configFile
+  return $
+    OnDemandConfig
+      { odcRemote = RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port, rscDstDir = tmpdir}
+      , odcTracer = nullTracer
+      , odcChunkInfo = podcChunkInfo
+      , odcHasFS = fpToHasFS tmpdir
+      , odcCodecConfig = codecConfig
+      , odcCheckIntegrity = const podcIntegrityConstant
+      , odcMaxCachedChunks = podcMaxCachedChunks
+      , odcPrefetchAhead = podcPrefetchAhead
+      }
+
+topLevelConfigFileRelativePath :: FilePath
+topLevelConfigFileRelativePath = "test" </> "data" </> "config" </> "config.json"

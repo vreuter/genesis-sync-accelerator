@@ -1,22 +1,19 @@
 {-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Test.GenesisSyncAccelerator.OnDemandRuntime (tests) where
+module Test.GenesisSyncAccelerator.OnDemand.Runtime (tests) where
 
 import Control.Concurrent.Class.MonadSTM.Strict.TVar.Checked (readTVarIO)
-import Control.Monad (forM_)
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Aeson (ToJSON (..), decode, encode, object, (.=))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Proxy (Proxy (..))
-import qualified Data.Set as Set
 import qualified Data.Text.Encoding as Encoding
 import GHC.Conc (atomically)
 import GenesisSyncAccelerator.OnDemand
@@ -24,17 +21,15 @@ import GenesisSyncAccelerator.OnDemand
   , OnDemandRuntime (..)
   , OnDemandState (..)
   , OnDemandTip (..)
-  , ensureChunks
   , newOnDemandRuntime
   , readOnDemandTip
   )
-import GenesisSyncAccelerator.RemoteStorage (RemoteStorageConfig (..), RemoteTipInfo (..))
+import GenesisSyncAccelerator.RemoteStorage (RemoteTipInfo (..))
 import GenesisSyncAccelerator.Types
   ( MaxCachedChunksCount (..)
   , PrefetchChunksCount (..)
   , StandardBlock
   )
-import GenesisSyncAccelerator.Util (fpToHasFS, getTopLevelConfig)
 import Network.Wai.Application.Static (defaultFileServerSettings, staticApp)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Numeric.Natural
@@ -44,24 +39,20 @@ import Ouroboros.Consensus.Block
   , SlotNo (..)
   )
 import Ouroboros.Consensus.Cardano.Block (CardanoBlock, CardanoEras, StandardCrypto)
-import Ouroboros.Consensus.Config (configCodec)
 import Ouroboros.Consensus.HardFork.Combinator.AcrossEras (OneEraHash)
 import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
   ( ChunkInfo (..)
-  , ChunkNo (..)
   , ChunkSize (..)
   )
 import Paths_genesis_sync_accelerator (getDataFileName)
-import System.Directory (doesFileExist)
 import System.FS.IO (HandleIO)
 import System.FilePath (takeDirectory, (</>))
 import qualified System.IO.Temp as Temp
-import Test.GenesisSyncAccelerator.Utilities (getCurrentFilenamesForChunk)
+import Test.GenesisSyncAccelerator.Types (ConfigFile (..), PartialOnDemandConfig (..), TmpDir (..))
+import Test.GenesisSyncAccelerator.Utilities (mkFullConfig, topLevelConfigFileRelativePath)
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertEqual, testCase)
 import Test.Tasty.QuickCheck (testProperty)
-import "contra-tracer" Control.Tracer (nullTracer)
 
 ----------------------------- Generators and properties -----------------------------
 instance Arbitrary ChunkInfo where
@@ -135,60 +126,6 @@ prop_newOnDemandRuntimeStartsWithoutTipIfRemoteMissing partialConfig =
 prop_RemoteTipInfoRoundtripsThroughJSON :: RemoteTipInfo -> Property
 prop_RemoteTipInfoRoundtripsThroughJSON tipInfo = decode (encode tipInfo) === Just tipInfo
 
-test_ensureChunksLRU :: IO ()
-test_ensureChunksLRU = do
-  withTemp $ \remoteDir -> do
-    -- 1. Create dummy files for 3 chunks in "remote"
-    forM_ [0, 1, 2] $ \n -> do
-      forM_ (getCurrentFilenamesForChunk (ChunkNo n)) $ \fn ->
-        writeFile (remoteDir </> fn) "dummy"
-
-    withTemp $ \cacheDir -> do
-      testWithApplication (pure $ staticApp $ defaultFileServerSettings remoteDir) $ \port -> do
-        let partialConfig =
-              PartialOnDemandConfig
-                { podcChunkInfo = UniformChunkSize (ChunkSize False 10)
-                , podcIntegrityConstant = True
-                , podcMaxCachedChunks = MaxCachedChunksCount 2 -- This is what's under test.
-                , podcPrefetchAhead = PrefetchChunksCount 0
-                }
-        configFile <- getDataFileName topLevelConfigFileRelativePath
-        config <- mkFullConfig partialConfig (ConfigFile configFile) (TmpDir cacheDir) port
-        runtime <- newOnDemandRuntime config
-
-        -- Request chunk 0
-        _ <- ensureChunks runtime [ChunkNo 0]
-        state0 <- readTVarIO (odrState runtime)
-        assertEqual "Cache contains chunk 0" (Set.singleton (ChunkNo 0)) (odsCachedChunks state0)
-
-        -- Request chunk 1
-        _ <- ensureChunks runtime [ChunkNo 1]
-        state1 <- readTVarIO (odrState runtime)
-        assertEqual
-          "Cache contains chunks 0 and 1"
-          (Set.fromList [ChunkNo 0, ChunkNo 1])
-          (odsCachedChunks state1)
-
-        -- Request chunk 2
-        _ <- ensureChunks runtime [ChunkNo 2]
-        state2 <- readTVarIO (odrState runtime)
-        assertEqual
-          "Cache contains chunks 1 and 2"
-          (Set.fromList [ChunkNo 1, ChunkNo 2])
-          (odsCachedChunks state2)
-        assertEqual "Chunk 0 evicted from state" False (ChunkNo 0 `Set.member` odsCachedChunks state2)
-
-        -- Verify files deleted from disk
-        forM_ (getCurrentFilenamesForChunk (ChunkNo 0)) $ \fn -> do
-          exists <- doesFileExist (cacheDir </> fn)
-          assertEqual ("Chunk 0 file " ++ fn ++ " deleted") False exists
-
-        -- Verify files present for chunks 1 and 2
-        forM_ [1, 2] $ \n ->
-          forM_ (getCurrentFilenamesForChunk (ChunkNo n)) $ \fn -> do
-            exists <- doesFileExist (cacheDir </> fn)
-            assertEqual ("Chunk " ++ show n ++ " file " ++ fn ++ " present") True exists
-
 prop_newOnDemandRuntimeFetchesRemoteTip :: PartialOnDemandConfig -> Property
 prop_newOnDemandRuntimeFetchesRemoteTip partialConfig =
   ioQuickly $ do
@@ -234,18 +171,6 @@ instance ToJSON (OnDemandTip StandardBlock) where
       , "hash" .= Encoding.decodeUtf8 (toRawHash (Proxy @(CardanoBlock StandardCrypto)) odtHash)
       ]
 
-data PartialOnDemandConfig = PartialOnDemandConfig
-  { podcChunkInfo :: ChunkInfo
-  , podcIntegrityConstant :: Bool
-  , podcMaxCachedChunks :: MaxCachedChunksCount
-  , podcPrefetchAhead :: PrefetchChunksCount
-  }
-  deriving Show
-
-newtype ConfigFile = ConfigFile {unConfigFile :: FilePath} deriving Show
-
-newtype TmpDir = TmpDir {unTmpDir :: FilePath} deriving Show
-
 checkFromConfig ::
   PartialOnDemandConfig -> (OnDemandConfig IO StandardBlock HandleIO -> IO Property) -> IO Property
 checkFromConfig partialConfig mkProp =
@@ -257,32 +182,6 @@ checkFromConfig partialConfig mkProp =
       \port -> do
         config <- mkFullConfig partialConfig (ConfigFile configFile) tmpdir port
         mkProp config
-
-topLevelConfigFileName :: String
-topLevelConfigFileName = "config.json"
-
-topLevelConfigFileRelativePath :: FilePath
-topLevelConfigFileRelativePath = "test" </> "data" </> "config" </> topLevelConfigFileName
-
-mkFullConfig ::
-  PartialOnDemandConfig ->
-  ConfigFile ->
-  TmpDir ->
-  Int ->
-  IO (OnDemandConfig IO StandardBlock HandleIO)
-mkFullConfig PartialOnDemandConfig{..} (ConfigFile configFile) (TmpDir tmpdir) port = do
-  codecConfig <- configCodec <$> getTopLevelConfig configFile
-  return $
-    OnDemandConfig
-      { odcRemote = RemoteStorageConfig{rscSrcUrl = "http://localhost:" ++ show port, rscDstDir = tmpdir}
-      , odcTracer = nullTracer
-      , odcChunkInfo = podcChunkInfo
-      , odcHasFS = fpToHasFS tmpdir
-      , odcCodecConfig = codecConfig
-      , odcCheckIntegrity = const podcIntegrityConstant
-      , odcMaxCachedChunks = podcMaxCachedChunks
-      , odcPrefetchAhead = podcPrefetchAhead
-      }
 
 instance Arbitrary PartialOnDemandConfig where
   arbitrary = do
@@ -305,7 +204,7 @@ ioQuickly :: forall prop. Testable prop => IO prop -> Property
 ioQuickly = quickly . ioProperty
 
 withTemp :: forall m a. (MonadIO m, MonadMask m) => (FilePath -> m a) -> m a
-withTemp = Temp.withSystemTempDirectory "on-demand-test"
+withTemp = Temp.withSystemTempDirectory "on-demand-runtime-test"
 
 ----------------------------- Property aggregation -----------------------------
 tests :: TestTree
@@ -327,9 +226,6 @@ tests =
     , testProperty
         "RemoteTipInfo roundtrips through JSON encoding/decoding"
         prop_RemoteTipInfoRoundtripsThroughJSON
-    , testCase
-        "ensureChunks maintains maxCachedChunks through LRU policy"
-        test_ensureChunksLRU
     , testProperty
         "newOnDemandRuntime fetches tip from remote"
         prop_newOnDemandRuntimeFetchesRemoteTip
