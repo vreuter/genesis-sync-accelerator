@@ -94,6 +94,7 @@ import Ouroboros.Consensus.Util.IOLike
   , SomeException
   , StrictTVar
   , atomically
+  , bracketOnError
   , newTVarIO
   , onException
   , readTVar
@@ -102,7 +103,16 @@ import Ouroboros.Consensus.Util.IOLike
   , try
   )
 import Ouroboros.Consensus.Util.NormalForm.StrictTVar (writeTVar)
-import System.FS.API (HasFS, OpenMode (ReadMode), hGetSize, removeFile, withFile)
+import System.FS.API
+  ( Handle
+  , HasFS
+  , OpenMode (ReadMode)
+  , hClose
+  , hGetSize
+  , hOpen
+  , removeFile
+  , withFile
+  )
 import "contra-tracer" Control.Tracer (traceWith)
 
 -- | Configuration for on-demand fetching.
@@ -338,7 +348,6 @@ mkOnDemandIterator
               [] -> return IteratorExhausted
               (c : rest) -> do
                 atomically $ writeTVar varChunks rest
-
                 flip onException cleanupOnError $ do
                   -- Compute and set new active prefetch window.
                   let newWindow = c : genericTake numPrefetch rest
@@ -356,7 +365,7 @@ mkOnDemandIterator
                       return IteratorExhausted
                     else do
                       it <-
-                        mkRawChunkIterator
+                        mkRawBlockIterator
                           odcHasFS
                           odcChunkInfo
                           odcCodecConfig
@@ -522,7 +531,7 @@ chunkForTo ci (StreamToInclusive pt) = ChunkLayout.chunkIndexOfSlot ci (realPoin
 -- This iterator is "stateless" in the sense that it does not rely on the global
 -- 'ImmutableDB' state (tip, indices, etc.). Instead, it directly parses the
 -- secondary index files on disk to find the requested blocks.
-mkRawChunkIterator ::
+mkRawBlockIterator ::
   forall m blk b h.
   ( IOLike m
   , MonadIO m
@@ -547,7 +556,7 @@ mkRawChunkIterator ::
   -- | The list of chunks (epochs) to iterate over.
   [ChunkNo] ->
   m (Iterator m blk b)
-mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
+mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
   -- 1. Read all entries from all requested chunks.
   -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
   allEntries <- forM chunks $ \chunk -> do
@@ -564,27 +573,44 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
           . applyStreamFrom chunkInfo from
           $ concat allEntries
   varEntries <- newTVarIO flatEntries
+  varHandle <- newTVarIO (Nothing :: Maybe (Handle h))
 
   -- 2. Define the 'iteratorNext' action.
   -- This action pops the next entry from the queue, opens the corresponding chunk file,
   -- reads the block data, and extracts the requested component.
+  -- Since this iterator always serves a single chunk, the handle is opened once on the
+  -- first call and reused for all subsequent blocks.
   let next =
         readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
           ((chunk, WithBlockSize size entry) : rest) -> do
             atomically $ writeTVar varEntries rest
-            -- We open the file for every block. This is inefficient but safe.
-            -- Optimization: Keep the file handle open until the chunk changes.
-            res <- withFile hasFS (fsPathChunkFile chunk) ReadMode $ \hnd ->
-              extractBlockComponent
-                hasFS
-                chunkInfo
-                chunk
-                codecConfig
-                checkIntegrity
-                hnd
-                (WithBlockSize size entry)
-                component
+
+            handle <-
+              readTVarIO varHandle >>= \case
+                Just h -> pure h
+                Nothing ->
+                  bracketOnError
+                    (hOpen hasFS (fsPathChunkFile chunk) ReadMode)
+                    closeHandle
+                    (\h -> h <$ atomically (writeTVar varHandle (Just h)))
+
+            res <-
+              onException
+                ( extractBlockComponent
+                    hasFS
+                    chunkInfo
+                    chunk
+                    codecConfig
+                    checkIntegrity
+                    handle
+                    (WithBlockSize size entry)
+                    component
+                )
+                ( do
+                    atomically $ writeTVar varHandle Nothing
+                    closeHandle handle
+                )
             return $ IteratorResult res
 
       -- 3. Define the 'iteratorHasNext' action.
@@ -596,11 +622,16 @@ mkRawChunkIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
             return $ Just (tipToRealPoint chunkInfo entry)
 
       -- 4. Define the 'iteratorClose' action.
-      -- Since we don't keep persistent file handles (we open/close per block),
-      -- there is nothing to clean up here.
-      close = return ()
+      close =
+        readTVarIO varHandle >>= \case
+          Nothing -> pure ()
+          Just handle -> closeHandle handle
 
   return Iterator{iteratorNext = next, iteratorHasNext = hasNext, iteratorClose = close}
+ where
+  -- \| Reusable function to close the given handle
+  closeHandle :: Handle h -> m ()
+  closeHandle = hClose hasFS
 
 -- | Helper to convert an Index 'Entry' (which stores hash and slot/epoch)
 -- into a 'RealPoint' (which uses SlotNo).
