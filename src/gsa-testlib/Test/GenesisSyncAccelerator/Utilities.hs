@@ -37,8 +37,8 @@ currentFileTypes = [ChunkFile, PrimaryIndexFile, SecondaryIndexFile]
 genSeveralChunkNumbers :: Gen [ChunkNo]
 genSeveralChunkNumbers = do
   n <- choose (2, 5)
-  ints <- shuffle [1 .. 10]
-  return $ map ChunkNo $ take n ints
+  raws <- shuffle [1 .. 10]
+  return $ map ChunkNo $ take n raws
 
 -- | Get the name of each file possibly associated with a chunk.
 getAllFilenamesForChunk :: ChunkNo -> [String]
