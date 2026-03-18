@@ -147,10 +147,14 @@ fetchTipInfo tracer env = do
         case statusCode (responseStatus r) of
           200 -> Bifunctor.first (TraceDownloadException tipUrl) $ eitherDecode (responseBody r)
           status -> Left $ TraceDownloadError tipUrl status
-  traceWith tracer $ TraceDownloadStart tipUrl
+  traceWith tracer $ TraceTipFetchStart tipUrl
   result <-
     try (httpLbs request (rseManager env)) :: IO (Either SomeException (Response LBS.ByteString))
-  return $ either (Left . TraceDownloadException tipUrl . show) processResponse result
+  let outcome = either (Left . TraceDownloadException tipUrl . show) processResponse result
+  case outcome of
+    Right _ -> traceWith tracer $ TraceTipFetchSuccess tipUrl
+    Left failure -> traceWith (contramap TraceDownloadFailure tracer) failure
+  return outcome
 
 instance FromJSON RemoteTipInfo where
   parseJSON = withObject "RemoteTipInfo" $ \o ->
