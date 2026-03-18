@@ -5,7 +5,7 @@ let
   tool-index-state = "2025-05-25T20:50:09Z";
   tool =
     name: version: other:
-    final.haskell-nix.tool "ghc98" name (
+    final.haskell-nix.tool (import ./ghc.nix) name (
       {
         version = version;
         index-state = tool-index-state;
