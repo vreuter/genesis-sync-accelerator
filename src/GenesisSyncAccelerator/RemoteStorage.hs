@@ -31,6 +31,7 @@ import qualified Data.Bifunctor as Bifunctor
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Base16
 import qualified Data.ByteString.Lazy as LBS
+import Data.List (dropWhileEnd)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word64)
@@ -64,10 +65,7 @@ newRemoteStorageEnv url dir =
   (\mgr -> RemoteStorageEnv{rseConfig = cfg, rseManager = mgr})
     <$> HTTP.newManager tlsManagerSettings
  where
-  cfg = RemoteStorageConfig{rscSrcUrl = dropTrailingSlashes url, rscDstDir = dir}
-  dropTrailingSlashes s
-    | not (null s) && last s == '/' = dropTrailingSlashes (init s)
-    | otherwise = s
+  cfg = RemoteStorageConfig{rscSrcUrl = dropWhileEnd (== '/') url, rscDstDir = dir}
 
 -- | Runtime environment for the remote storage client, pairing a 'RemoteStorageConfig'
 -- with a shared HTTP 'Manager'.
