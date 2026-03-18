@@ -18,7 +18,7 @@ let
     };
   hsPkgs = haskell-nix.cabalProject {
     src = ./..;
-    compiler-nix-name = "ghc967";
+    compiler-nix-name = import ./ghc.nix;
     inputMap = {
       "https://chap.intersectmbo.org/" = inputs.CHaP;
     };
