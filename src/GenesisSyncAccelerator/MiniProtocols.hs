@@ -302,12 +302,6 @@ blockFetchServer tracer onDemand blockComponent _registry =
 sleepForever :: IOLike m => m a
 sleepForever = forever $ threadDelay 10
 
-data ImmDBServerException
-  = ReachedImmutableTip
-  | TriedToFetchGenesis
-  deriving stock Show
-  deriving anyclass Exception
-
 tipFromOnDemandTip :: OnDemand.OnDemandTip blk -> Tip blk
 tipFromOnDemandTip tip =
   Tip (OnDemand.odtSlot tip) (OnDemand.odtHash tip) (OnDemand.odtBlockNo tip)
