@@ -5,6 +5,7 @@
 module ChunkUploader.S3
   ( S3Handle
   , initS3
+  , credentialsWork
   , uploadChunkFile
   , chunkExistsOnS3
   ) where
@@ -35,31 +36,43 @@ data S3Handle = S3Handle
 -- | Initialize the S3 handle from uploader config.
 -- Discovers credentials from environment variables (AWS_ACCESS_KEY_ID,
 -- AWS_SECRET_ACCESS_KEY) which works for both AWS and R2.
-initS3 :: UploaderConfig -> IO S3Handle
+initS3 :: UploaderConfig -> IO (Either Text S3Handle)
 initS3 cfg = do
   env0 <- Amazonka.newEnv Amazonka.discover
   let region = Amazonka.Region' (ucS3Region cfg)
       env1 = env0{Amazonka.region = region}
-  env2 <- case ucS3Endpoint cfg of
-    Nothing -> pure env1
-    Just ep -> do
-      (useTLS, host, port) <- parseEndpoint ep
-      let svc =
-            Amazonka.setEndpoint
-              useTLS
-              host
-              port
-              S3.defaultService
-          -- AWS S3 buckets rely on wildcard DNS resolution (<bucket-name>.s3.<region>.amazonaws.com),
-          -- which doesn't work with custom endpoints (R2, MinIO). Use path-style addressing instead.
-          svc' = svc{Amazonka.s3AddressingStyle = Amazonka.S3AddressingStylePath}
-       in pure $ Amazonka.configureService svc' env1
-  pure
-    S3Handle
-      { s3Env = env2
-      , s3Bucket = S3.BucketName (ucS3Bucket cfg)
-      , s3Prefix = ucS3Prefix cfg
-      }
+  pure $ do
+    env2 <- case ucS3Endpoint cfg of
+      Nothing -> Right env1
+      Just ep -> do
+        (useTLS, host, port) <- parseEndpoint ep
+        let svc =
+              Amazonka.setEndpoint
+                useTLS
+                host
+                port
+                S3.defaultService
+            -- AWS S3 buckets rely on wildcard DNS resolution (<bucket-name>.s3.<region>.amazonaws.com),
+            -- which doesn't work with custom endpoints (R2, MinIO). Use path-style addressing instead.
+            svc' = svc{Amazonka.s3AddressingStyle = Amazonka.S3AddressingStylePath}
+         in Right $ Amazonka.configureService svc' env1
+    Right
+      S3Handle
+        { s3Env = env2
+        , s3Bucket = S3.BucketName (ucS3Bucket cfg)
+        , s3Prefix = ucS3Prefix cfg
+        }
+
+-- | Check S3 credentials by performing a HeadBucket request.
+credentialsWork :: S3Handle -> IO Bool
+credentialsWork h = do
+  let req = S3.newHeadBucket (s3Bucket h)
+  result <- try $ Amazonka.runResourceT (Amazonka.send (s3Env h) req)
+  case result of
+    Right _ -> pure True
+    Left (e :: SomeException)
+      | Just (SomeAsyncException _) <- fromException e -> throwIO e
+      | otherwise -> pure False
 
 -- | Upload a single chunk file to S3.
 uploadChunkFile :: S3Handle -> ChunkNo -> String -> FilePath -> IO ()
@@ -74,22 +87,23 @@ uploadChunkFile h cn ext localDir = do
     pure ()
 
 -- | Parse an endpoint URL into (useTLS, host, port).
--- Uses http-client's 'parseRequest' which raises on failure.
-parseEndpoint :: Text -> IO (Bool, BS.ByteString, Int)
-parseEndpoint url = do
-  req <- parseRequest (T.unpack url)
-  let path = HTTP.path req
-  if path /= "/" && path /= ""
-    then
-      fail $
-        "Endpoint URL must not contain a path (Amazonka's setEndpoint does not support path prefixes), got: "
-          <> T.unpack url
-    else
-      pure
-        ( HTTP.secure req
-        , HTTP.host req
-        , HTTP.port req
-        )
+parseEndpoint :: Text -> Either Text (Bool, BS.ByteString, Int)
+parseEndpoint url =
+  case parseRequest (T.unpack url) of
+    Nothing ->
+      Left $ "Invalid endpoint URL: " <> url
+    Just req
+      | let path = HTTP.path req
+      , path /= "/" && path /= "" ->
+          Left $
+            "Endpoint URL must not contain a path (Amazonka's setEndpoint does not support path prefixes), got: "
+              <> url
+      | otherwise ->
+          Right
+            ( HTTP.secure req
+            , HTTP.host req
+            , HTTP.port req
+            )
 
 -- | Check if a chunk's .chunk file already exists on S3.
 -- Used for startup reconciliation.

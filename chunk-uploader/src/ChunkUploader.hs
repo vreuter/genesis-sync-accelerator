@@ -1,4 +1,5 @@
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,7 +9,7 @@ module ChunkUploader
   ) where
 
 import ChunkUploader.Detection (scanCompletedChunks)
-import ChunkUploader.S3 (S3Handle, initS3, uploadChunkFile)
+import ChunkUploader.S3 (S3Handle, credentialsWork, initS3, uploadChunkFile)
 import ChunkUploader.State
   ( defaultStateFile
   , loadState
@@ -22,7 +23,9 @@ import ChunkUploader.Types
   )
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeAsyncException (..), SomeException, fromException, throwIO, try)
+import Control.Monad (unless)
 import Data.Maybe (fromMaybe)
+import System.Exit (exitFailure)
 import "contra-tracer" Control.Tracer (Tracer, traceWith)
 
 -- | Maximum number of retry attempts per chunk upload.
@@ -40,7 +43,16 @@ maxBackoffMicros = 30_000_000
 -- | Run the main upload loop. This function does not return.
 runUploader :: Tracer IO TraceUploaderEvent -> UploaderConfig -> IO ()
 runUploader tracer cfg = do
-  s3 <- initS3 cfg
+  result <- initS3 cfg
+  s3 <- case result of
+    Left err -> do
+      traceWith tracer (TraceS3InitFailure err)
+      exitFailure
+    Right h -> pure h
+  ok <- credentialsWork s3
+  unless ok $ do
+    traceWith tracer (TraceCredentialValidationFailure "HeadBucket request failed")
+    exitFailure
   let stateFile = fromMaybe (defaultStateFile $ ucImmutableDir cfg) (ucStateFile cfg)
   lastUploaded <- loadState stateFile
   traceWith tracer (TraceStateLoaded lastUploaded)

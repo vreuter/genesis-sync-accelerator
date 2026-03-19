@@ -6,6 +6,8 @@ module ChunkUploader.State
 
 import ChunkUploader.Types (ChunkNo (..))
 import Control.Exception (uninterruptibleMask_)
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.Directory (doesFileExist, renameFile)
 import System.FilePath ((</>))
 import Text.Read (readMaybe)
@@ -17,8 +19,8 @@ loadState fp = do
   exists <- doesFileExist fp
   if exists
     then do
-      contents <- readFile fp
-      let trimmed = filter (/= '\n') contents
+      contents <- T.readFile fp
+      let trimmed = T.unpack (T.strip contents)
       pure $ ChunkNo <$> readMaybe trimmed
     else pure Nothing
 

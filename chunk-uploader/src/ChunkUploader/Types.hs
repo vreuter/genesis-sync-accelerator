@@ -47,6 +47,8 @@ data TraceUploaderEvent
   | TraceUploadRetry !ChunkNo !Int
   | TraceStateLoaded !(Maybe ChunkNo)
   | TraceStateSaved !ChunkNo
+  | TraceS3InitFailure !Text
+  | TraceCredentialValidationFailure !Text
   deriving stock (Eq, Show)
 
 -- | Build the filename for a chunk with a given extension.
