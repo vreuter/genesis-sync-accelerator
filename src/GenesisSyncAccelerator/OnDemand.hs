@@ -510,10 +510,9 @@ getChunksInRange chunkInfo from to =
       endChunk = chunkForTo chunkInfo to
    in chunksBetween startChunk endChunk
  where
-  chunksBetween a'@(ChunkNo a) b'@(ChunkNo b) =
-    case (if b < a then [b .. a] else [a .. b]) of
-      [] -> error $ "Empty range: " ++ show a' ++ " --> " ++ show b'
-      (h : t) -> fmap ChunkNo $ h NEL.:| t
+  chunksBetween (ChunkNo a) (ChunkNo b) = case map ChunkNo (if b < a then [b .. a] else [a .. b]) of
+    [] -> error $ "Empty range: " ++ show a ++ " --> " ++ show b
+    (h : t) -> h NEL.:| t
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo
