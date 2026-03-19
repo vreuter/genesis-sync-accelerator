@@ -23,7 +23,6 @@ module GenesisSyncAccelerator.OnDemand
   , OnDemandTip (..)
   , OnDemandState (..)
   , deleteChunkFiles
-  , ensureChunks
   , newOnDemandRuntime
   , onDemandIteratorForRange
   , onDemandIteratorFrom
@@ -469,30 +468,6 @@ registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCou
       liftIO $ putMVar psJobs pj
     )
     `onException` liftIO (putMVar psJobs pj)
-
--- | Download missing chunks and register them in the LRU cache.
-ensureChunks ::
-  (IOLike m, MonadIO m) =>
-  OnDemandRuntime m blk h ->
-  NEL.NonEmpty ChunkNo ->
-  m Bool
-ensureChunks
-  OnDemandRuntime
-    { odrConfig = cfg@OnDemandConfig{odcTracer, odcRemote}
-    , odrManager
-    , odrState
-    , odrPrefetch
-    }
-  chunks = do
-    let env = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
-    cached <- odsCachedChunks <$> readTVarIO odrState
-    let missing = NEL.filter (`Set.notMember` cached) chunks
-    results <- liftIO $ mapM (awaitDownload odcTracer env odrPrefetch) missing
-    case sequence_ results of
-      Left _ -> return False
-      Right _ -> do
-        mapM_ (registerInCache cfg odrPrefetch odrState) missing
-        return True
 
 -- | Deletes the triad of files associated with a chunk.
 deleteChunkFiles :: IOLike m => HasFS m h -> ChunkNo -> m ()

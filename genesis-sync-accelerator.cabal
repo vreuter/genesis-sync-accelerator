@@ -238,19 +238,15 @@ test-suite on-demand-tests
   build-depends:
     aeson,
     bytestring,
-    containers,
-    directory,
     exceptions,
     filepath,
     fs-api,
     genesis-sync-accelerator,
     genesis-sync-accelerator:gsa-testlib,
-    nonempty-containers,
     ouroboros-consensus,
     ouroboros-consensus-cardano,
     strict-checked-vars,
     tasty,
-    tasty-hunit,
     tasty-quickcheck,
     temporary,
     text,
@@ -259,5 +255,4 @@ test-suite on-demand-tests
 
   other-modules:
     Paths_genesis_sync_accelerator
-    Test.GenesisSyncAccelerator.OnDemand.EnsureChunks
     Test.GenesisSyncAccelerator.OnDemand.Runtime
