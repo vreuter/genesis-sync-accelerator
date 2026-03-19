@@ -15,7 +15,7 @@ import qualified Data.Set as Set
 import qualified Data.Set.NonEmpty as NES
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
-import Data.Word (Word16, Word64)
+import Data.Word (Word64)
 import GHC.Conc (atomically)
 import GenesisSyncAccelerator.OnDemand
   ( OnDemandConfig (..)
@@ -108,61 +108,63 @@ test_ensureChunksLRU = do
             assertEqual ("Chunk " ++ show n ++ " file " ++ fn ++ " present") True exists
 
 prop_whenAllRequestedChunksAreCachedEnsureChunksReturnsTrue ::
-  PartialOnDemandConfig -> NonEmpty ChunkNo -> PortNo -> Property
-prop_whenAllRequestedChunksAreCachedEnsureChunksReturnsTrue partialConfig chunkNumbers port =
+  PartialOnDemandConfig -> NonEmpty ChunkNo -> Property
+prop_whenAllRequestedChunksAreCachedEnsureChunksReturnsTrue partialConfig chunkNumbers =
   ioQuickly $
     withTemp $ \tmp -> do
-      config <-
-        getDataFileName topLevelConfigFileRelativePath
-          >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) (fromIntegral port))
-      runtime <-
-        newOnDemandRuntime
-          config{odcMaxCachedChunks = MaxCachedChunksCount (1 + fromIntegral (length chunkNumbers))}
-      state <- readTVarIO (odrState runtime)
-      atomically $
-        writeTVar (odrState runtime) $
-          state{odsCachedChunks = Set.fromList (NEL.toList chunkNumbers)}
-      cachedChunkNumbers <- odsCachedChunks <$> readTVarIO (odrState runtime)
-      assertEqual
-        "Precondition: all requested chunks are cached"
-        (Set.fromList (NEL.toList chunkNumbers))
-        cachedChunkNumbers
-      result <- ensureChunks runtime chunkNumbers
-      return $ property $ result === True
+      testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $ \port -> do
+        config <-
+          getDataFileName topLevelConfigFileRelativePath
+            >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
+        runtime <-
+          newOnDemandRuntime
+            config{odcMaxCachedChunks = MaxCachedChunksCount (1 + fromIntegral (length chunkNumbers))}
+        state <- readTVarIO (odrState runtime)
+        atomically $
+          writeTVar (odrState runtime) $
+            state{odsCachedChunks = Set.fromList (NEL.toList chunkNumbers)}
+        cachedChunkNumbers <- odsCachedChunks <$> readTVarIO (odrState runtime)
+        assertEqual
+          "Precondition: all requested chunks are cached"
+          (Set.fromList (NEL.toList chunkNumbers))
+          cachedChunkNumbers
+        result <- ensureChunks runtime chunkNumbers
+        return $ property $ result === True
 
 prop_whenAllRequestedChunksAreCachedEnsureChunksDownloadsNothing ::
-  PartialOnDemandConfig -> NonEmpty ChunkNo -> PortNo -> Property
-prop_whenAllRequestedChunksAreCachedEnsureChunksDownloadsNothing partialConfig chunkNumbers port =
+  PartialOnDemandConfig -> NonEmpty ChunkNo -> Property
+prop_whenAllRequestedChunksAreCachedEnsureChunksDownloadsNothing partialConfig chunkNumbers =
   ioQuickly $
     withTemp $ \tmp -> do
       let logFile = tmp </> "tmp.log"
       preContents <- Set.fromList <$> listDirectory tmp
-      config <-
-        getDataFileName topLevelConfigFileRelativePath
-          >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) (fromIntegral port))
-      runtime <-
-        newOnDemandRuntime
-          config
-            { odcTracer = tracerToFile logFile
-            , odcMaxCachedChunks = MaxCachedChunksCount (1 + fromIntegral (length chunkNumbers))
-            }
-      state <- readTVarIO (odrState runtime)
-      atomically $
-        writeTVar (odrState runtime) $
-          state{odsCachedChunks = Set.fromList (NEL.toList chunkNumbers)}
-      cachedChunkNumbers <- odsCachedChunks <$> readTVarIO (odrState runtime)
-      assertEqual
-        "Precondition: all requested chunks are cached"
-        (Set.fromList (NEL.toList chunkNumbers))
-        cachedChunkNumbers
-      _ <- ensureChunks runtime chunkNumbers
-      postContents <- Set.fromList <$> listDirectory (takeDirectory logFile)
-      logLines <- lines . Text.unpack <$> TIO.readFile logFile
-      return $
-        conjoin
-          [ property $ filter isChunkRelatedLine logLines === []
-          , postContents === Set.insert (takeFileName logFile) preContents
-          ]
+      testWithApplication (pure $ staticApp $ defaultFileServerSettings tmp) $ \port -> do
+        config <-
+          getDataFileName topLevelConfigFileRelativePath
+            >>= (\f -> mkFullConfig partialConfig (ConfigFile f) (TmpDir tmp) port)
+        runtime <-
+          newOnDemandRuntime
+            config
+              { odcTracer = tracerToFile logFile
+              , odcMaxCachedChunks = MaxCachedChunksCount (1 + fromIntegral (length chunkNumbers))
+              }
+        state <- readTVarIO (odrState runtime)
+        atomically $
+          writeTVar (odrState runtime) $
+            state{odsCachedChunks = Set.fromList (NEL.toList chunkNumbers)}
+        cachedChunkNumbers <- odsCachedChunks <$> readTVarIO (odrState runtime)
+        assertEqual
+          "Precondition: all requested chunks are cached"
+          (Set.fromList (NEL.toList chunkNumbers))
+          cachedChunkNumbers
+        _ <- ensureChunks runtime chunkNumbers
+        postContents <- Set.fromList <$> listDirectory (takeDirectory logFile)
+        logLines <- lines . Text.unpack <$> TIO.readFile logFile
+        return $
+          conjoin
+            [ property $ filter isChunkRelatedLine logLines === []
+            , postContents === Set.insert (takeFileName logFile) preContents
+            ]
 
 prop_whenNoRequestedChunksAreCachedButAllAreAvailableRemotelyEnsureChunksReturnsTrue ::
   PartialOnDemandConfig -> NonEmpty ChunkNo -> Property
@@ -273,8 +275,6 @@ prop_whenSomeRequestedChunksAreNeitherCachedNorAvailableRemotelyEnsureChunksRetu
               (Set.fromList forCache)
             result <- ensureChunks runtime $ NES.toList chunksSuperset
             return $ property $ result === False
-
-type PortNo = Word16
 
 instance Arbitrary (NonEmpty ChunkNo) where
   arbitrary = do
