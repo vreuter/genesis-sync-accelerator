@@ -511,7 +511,7 @@ getChunksInRange chunkInfo from to =
    in chunksBetween startChunk endChunk
  where
   chunksBetween (ChunkNo a) (ChunkNo b) = case map ChunkNo (if b < a then [b .. a] else [a .. b]) of
-    [] -> error $ "Empty range: " ++ show a ++ " --> " ++ show b
+    [] -> error $ "Unreachable! Empty range: " ++ show a ++ " --> " ++ show b
     (h : t) -> h NEL.:| t
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
