@@ -203,7 +203,7 @@ prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemotelyEnsureChunksR
               "Precondition: all chunks predesignated as cached are cached"
               obsCached
               (NES.toSet cachedChunks)
-            result <- ensureChunks runtime $ NES.toList remoteChunks
+            result <- ensureChunks runtime $ NES.toList $ NES.union remoteChunks cachedChunks
             return $ property $ result === True
 
 prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemoteEnsureChunksDownloadsOnlyMissing ::
@@ -244,7 +244,7 @@ prop_whenSomeRequestedChunksAreNeitherCachedNorAvailableRemotelyEnsureChunksRetu
       let (forServer, forCache) = NEL.partition (\(ChunkNo n) -> even n) $ NES.toList chunksSubset
       assertBool
         "Precondition: some requested chunks will be neither cached nor available remotely"
-        (not $ Set.null $ NES.difference chunksSubset chunksSuperset)
+        (not $ Set.null $ NES.difference chunksSuperset chunksSubset)
       withTemp $ \remoteDir -> do
         -- Create dummy files for only the "superset" of requested chunks in "remote"
         forM_ forServer $ \n -> forM_ (getCurrentFilenamesForChunk n) (touchFile . (remoteDir </>))
