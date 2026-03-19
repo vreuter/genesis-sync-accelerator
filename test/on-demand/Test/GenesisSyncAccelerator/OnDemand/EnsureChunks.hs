@@ -185,7 +185,7 @@ prop_whenNoRequestedChunksAreCachedButAllAreAvailableRemotelyEnsureChunksReturns
 prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemotelyEnsureChunksReturnsTrue ::
   Property
 prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemotelyEnsureChunksReturnsTrue =
-  forAll genConfigAndSafeNestedChunkSets $ \(partialConfig, remoteChunks, cachedChunks) ->
+  forAll genCompatibleConfigAndDisjointChunkSets $ \(partialConfig, remoteChunks, cachedChunks) ->
     ioQuickly $
       withTemp $ \remoteDir -> do
         -- Create dummy files for all requested chunks in "remote"
@@ -211,7 +211,7 @@ prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemotelyEnsureChunksR
 prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemoteEnsureChunksDownloadsOnlyMissing ::
   Property
 prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemoteEnsureChunksDownloadsOnlyMissing =
-  forAll genConfigAndSafeNestedChunkSets $ \(partialConfig, remoteChunks, cachedChunks) ->
+  forAll genCompatibleConfigAndDisjointChunkSets $ \(partialConfig, remoteChunks, cachedChunks) ->
     ioQuickly $
       withTemp $ \remoteDir -> do
         -- Create dummy files for all requested chunks in "remote"
@@ -241,7 +241,7 @@ prop_whenSomeRequestedChunksAreCachedAndTheRestAreAvailableRemoteEnsureChunksDow
 
 prop_whenSomeRequestedChunksAreNeitherCachedNorAvailableRemotelyEnsureChunksReturnsFalse :: Property
 prop_whenSomeRequestedChunksAreNeitherCachedNorAvailableRemotelyEnsureChunksReturnsFalse =
-  forAll genConfigAndSafeNestedChunkSets $ \(partialConfig, chunksSuperset, chunksSubset) ->
+  forAll genCompatibleConfigAndDisjointChunkSets $ \(partialConfig, chunksSuperset, chunksSubset) ->
     ioProperty $ do
       let (forServer, forCache) = NEL.partition (\(ChunkNo n) -> even n) $ NES.toList chunksSubset
       assertBool
@@ -283,10 +283,11 @@ instance Arbitrary (NonEmpty ChunkNo) where
     return $ h :| t
 
 -- Generate a partial config and two chunk number sets, one containing the other.
-genConfigAndSafeNestedChunkSets :: Gen (PartialOnDemandConfig, NES.NESet ChunkNo, NES.NESet ChunkNo)
-genConfigAndSafeNestedChunkSets = do
+genCompatibleConfigAndDisjointChunkSets ::
+  Gen (PartialOnDemandConfig, NES.NESet ChunkNo, NES.NESet ChunkNo)
+genCompatibleConfigAndDisjointChunkSets = do
   partialConfig <- arbitrary
-  (remoteChunks, cachedChunks) <- genNestedChunkSets
+  (remoteChunks, cachedChunks) <- genDisjointChunkSets
   pure
     ( partialConfig
         { podcMaxCachedChunks =
@@ -296,8 +297,8 @@ genConfigAndSafeNestedChunkSets = do
     , cachedChunks
     )
 
-genNestedChunkSets :: Gen (NES.NESet ChunkNo, NES.NESet ChunkNo)
-genNestedChunkSets = do
+genDisjointChunkSets :: Gen (NES.NESet ChunkNo, NES.NESet ChunkNo)
+genDisjointChunkSets = do
   n <- choose (2, maxSupersetSize - 1)
   (rawSuper, rest) <- splitAt n <$> shuffle chunks
   let super = NES.unsafeFromSet $ Set.fromList rawSuper
