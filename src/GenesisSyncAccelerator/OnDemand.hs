@@ -9,7 +9,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -31,7 +30,7 @@ module GenesisSyncAccelerator.OnDemand
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
-import Control.Monad (forM, unless, void)
+import Control.Monad (unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
@@ -373,7 +372,7 @@ mkOnDemandIterator
                           component
                           from
                           to
-                          (NEL.singleton c)
+                          c
                       atomically $ writeTVar varCurrentIt (Just it)
                       next -- Transition to next chunk
       hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
@@ -527,25 +526,23 @@ mkRawBlockIterator ::
   StreamFrom blk ->
   -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
   Maybe (StreamTo blk) ->
-  -- | The list of chunks (epochs) to iterate over.
-  NEL.NonEmpty ChunkNo ->
+  -- | The chunk from which to read blocks.
+  ChunkNo ->
   m (Iterator m blk b)
-mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
-  -- 1. Read all entries from all requested chunks.
-  -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
-  allEntries <- forM chunks $ \chunk -> do
+mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunk = do
+  -- 1. Read all entries from the requested chunks.
+  allEntries <- do
     chunkSize <- withFile hasFS (fsPathChunkFile chunk) ReadMode (hGetSize hasFS)
     -- Determine per-chunk whether the first entry is an EBB by reading
     -- the primary index, rather than assuming all chunks start with EBBs.
     mbFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
     let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
-    entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
-    return $ map (chunk,) entries
+    Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
 
   let flatEntries =
         maybe id (applyStreamTo chunkInfo) to
           . applyStreamFrom chunkInfo from
-          $ concat allEntries
+          $ allEntries
   varEntries <- newTVarIO flatEntries
   varHandle <- newTVarIO (Nothing :: Maybe (Handle h))
 
@@ -557,7 +554,7 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
   let next =
         readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
-          ((chunk, WithBlockSize size entry) : rest) -> do
+          ((WithBlockSize size entry) : rest) -> do
             atomically $ writeTVar varEntries rest
 
             handle <-
@@ -592,7 +589,7 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
       hasNext =
         readTVar varEntries >>= \case
           [] -> return Nothing
-          ((_, WithBlockSize _ entry) : _) ->
+          ((WithBlockSize _ entry) : _) ->
             return $ Just (tipToRealPoint chunkInfo entry)
 
       -- 4. Define the 'iteratorClose' action.
@@ -628,16 +625,16 @@ applyStreamFrom ::
   Eq (HeaderHash blk) =>
   ChunkInfo ->
   StreamFrom blk ->
-  [(ChunkNo, WithBlockSize (Entry blk))] ->
-  [(ChunkNo, WithBlockSize (Entry blk))]
+  [WithBlockSize (Entry blk)] ->
+  [WithBlockSize (Entry blk)]
 applyStreamFrom ci = \case
   StreamFromExclusive GenesisPoint -> id
   StreamFromExclusive (BlockPoint fromSlot fromHash) ->
-    dropWhile $ \(_, WithBlockSize _ e) ->
+    dropWhile $ \(WithBlockSize _ e) ->
       let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
        in eSlot < fromSlot || (eSlot == fromSlot && headerHash e == fromHash)
   StreamFromInclusive (RealPoint fromSlot fromHash) ->
-    dropWhile $ \(_, WithBlockSize _ e) ->
+    dropWhile $ \(WithBlockSize _ e) ->
       let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
        in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
 
@@ -649,10 +646,10 @@ applyStreamFrom ci = \case
 applyStreamTo ::
   ChunkInfo ->
   StreamTo blk ->
-  [(ChunkNo, WithBlockSize (Entry blk))] ->
-  [(ChunkNo, WithBlockSize (Entry blk))]
+  [WithBlockSize (Entry blk)] ->
+  [WithBlockSize (Entry blk)]
 applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
-  takeWhile $ \(_, WithBlockSize _ e) ->
+  takeWhile $ \(WithBlockSize _ e) ->
     ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
 
 tipFromRemote :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
