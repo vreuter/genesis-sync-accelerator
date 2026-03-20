@@ -31,15 +31,17 @@ fi
 WORKDIR="$(dirname "$DB_DIR")"
 mkdir -p "$WORKDIR" "$DB_DIR"
 
+SOCK="$(mktemp -u -t gsa-chain-init.XXXXXX.sock)"
+
 NODE_PID=""
-trap 'if [[ -n "$NODE_PID" ]]; then kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null || true; fi; rm -f "$WORKDIR/node.sock"' EXIT
+trap 'if [[ -n "$NODE_PID" ]]; then kill -INT "$NODE_PID" 2>/dev/null; wait "$NODE_PID" 2>/dev/null || true; fi; rm -f "$SOCK"' EXIT
 
 cardano-node run \
   --config "$CONFIG" \
   --database-path "$DB_DIR" \
   --topology "$TOPOLOGY" \
   --port "$NODE_PORT" \
-  --socket-path "$WORKDIR/node.sock" \
+  --socket-path "$SOCK" \
   >"$WORKDIR/node.log" 2>&1 &
 NODE_PID=$!
 
