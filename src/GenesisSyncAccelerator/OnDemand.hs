@@ -9,7 +9,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -23,22 +22,21 @@ module GenesisSyncAccelerator.OnDemand
   , OnDemandTip (..)
   , OnDemandState (..)
   , deleteChunkFiles
-  , ensureChunks
   , newOnDemandRuntime
   , onDemandIteratorForRange
   , onDemandIteratorFrom
   , readOnDemandTip
-  , tipFromRemote
   ) where
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
-import Control.Monad (forM, unless, void)
+import Control.Monad (unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (traverse_)
 import Data.List (delete, foldl', genericSplitAt, genericTake, partition)
+import qualified Data.List.NonEmpty as NEL
 import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
 import Data.Set (Set)
@@ -248,7 +246,7 @@ mkOnDemandIterator ::
   BlockComponent blk b ->
   StreamFrom blk ->
   Maybe (StreamTo blk) ->
-  [ChunkNo] ->
+  NEL.NonEmpty ChunkNo ->
   m (Iterator m blk b)
 mkOnDemandIterator
   OnDemandRuntime
@@ -270,7 +268,7 @@ mkOnDemandIterator
   from
   to
   chunks = do
-    varChunks <- newTVarIO chunks
+    varChunks <- newTVarIO $ NEL.toList chunks
     varCurrentIt <- newTVarIO Nothing
     {-
      Track the current prefetch window in a TVar so that chunks can get unpinned:
@@ -355,8 +353,9 @@ mkOnDemandIterator
 
                   -- Start background prefetches for uncached chunks in the window
                   cached <- odsCachedChunks <$> readTVarIO odrState
-                  let uncached = filter (`Set.notMember` cached) newWindow
-                  liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
+                  case NEL.nonEmpty $ filter (`Set.notMember` cached) newWindow of
+                    Nothing -> pure ()
+                    Just uncached -> liftIO $ prefetchChunks odcTracer remoteEnv odrPrefetch uncached
 
                   ok <- ensureChunkAvailable c
                   if not ok
@@ -373,7 +372,7 @@ mkOnDemandIterator
                           component
                           from
                           to
-                          [c]
+                          c
                       atomically $ writeTVar varCurrentIt (Just it)
                       next -- Transition to next chunk
       hasNext = readTVar varCurrentIt >>= maybe (return Nothing) iteratorHasNext
@@ -433,7 +432,7 @@ prefetchChunks ::
   Remote.RemoteStorageTracer IO ->
   Remote.RemoteStorageEnv ->
   PrefetchState ->
-  [ChunkNo] ->
+  NEL.NonEmpty ChunkNo ->
   IO ()
 prefetchChunks tracer env ps =
   mapM_ (startDownload tracer env ps)
@@ -469,30 +468,6 @@ registerInCache OnDemandConfig{odcHasFS, odcMaxCachedChunks = MaxCachedChunksCou
     )
     `onException` liftIO (putMVar psJobs pj)
 
--- | Download missing chunks and register them in the LRU cache.
-ensureChunks ::
-  (IOLike m, MonadIO m) =>
-  OnDemandRuntime m blk h ->
-  [ChunkNo] ->
-  m Bool
-ensureChunks
-  OnDemandRuntime
-    { odrConfig = cfg@OnDemandConfig{odcTracer, odcRemote}
-    , odrManager
-    , odrState
-    , odrPrefetch
-    }
-  chunks = do
-    let env = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
-    cached <- odsCachedChunks <$> readTVarIO odrState
-    let missing = filter (`Set.notMember` cached) chunks
-    results <- liftIO $ mapM (awaitDownload odcTracer env odrPrefetch) missing
-    case sequence_ results of
-      Left _ -> return False
-      Right _ -> do
-        mapM_ (registerInCache cfg odrPrefetch odrState) missing
-        return True
-
 -- | Deletes the triad of files associated with a chunk.
 deleteChunkFiles :: IOLike m => HasFS m h -> ChunkNo -> m ()
 deleteChunkFiles hasFS chunk = do
@@ -503,17 +478,15 @@ deleteChunkFiles hasFS chunk = do
   hRemove h f = void $ try @_ @SomeException $ removeFile h f
 
 -- | Identifies the set of chunks covering a given streaming range.
-getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> [ChunkNo]
+getChunksInRange :: ChunkInfo -> StreamFrom blk -> StreamTo blk -> NEL.NonEmpty ChunkNo
 getChunksInRange chunkInfo from to =
   let startChunk = chunkForFrom chunkInfo from
       endChunk = chunkForTo chunkInfo to
    in chunksBetween startChunk endChunk
  where
-  -- TODO: chunksBetween from ouroborous-consensus is incorrect, override locally to avoid this issue.
-  -- Remove this function when the fix is merged upstream.
-  -- See: https://github.com/tweag/genesis-sync-accelerator/issues/7
-  chunksBetween :: ChunkNo -> ChunkNo -> [ChunkNo]
-  chunksBetween (ChunkNo a) (ChunkNo b) = map ChunkNo $ if b < a then [b .. a] else [a .. b]
+  chunksBetween (ChunkNo a) (ChunkNo b) =
+    let (lo, hi) = if b < a then (b, a) else (a, b)
+     in fmap ChunkNo $ lo NEL.:| [lo + 1 .. hi]
 
 -- | Translates a 'StreamFrom' bound to its starting 'ChunkNo'.
 chunkForFrom :: ChunkInfo -> StreamFrom blk -> ChunkNo
@@ -553,25 +526,23 @@ mkRawBlockIterator ::
   StreamFrom blk ->
   -- | Stream upper bound (always inclusive): entries up to and including this point are streamed.
   Maybe (StreamTo blk) ->
-  -- | The list of chunks (epochs) to iterate over.
-  [ChunkNo] ->
+  -- | The chunk from which to read blocks.
+  ChunkNo ->
   m (Iterator m blk b)
-mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunks = do
-  -- 1. Read all entries from all requested chunks.
-  -- We map over the chunks, open the corresponding secondary index file, and parse all entries.
-  allEntries <- forM chunks $ \chunk -> do
+mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to chunk = do
+  -- 1. Read all entries from the requested chunks.
+  allEntries <- do
     chunkSize <- withFile hasFS (fsPathChunkFile chunk) ReadMode (hGetSize hasFS)
     -- Determine per-chunk whether the first entry is an EBB by reading
     -- the primary index, rather than assuming all chunks start with EBBs.
     mbFirstSlot <- Primary.readFirstFilledSlot (Proxy @blk) hasFS chunkInfo chunk
     let firstIsEBB = maybe IsNotEBB ChunkLayout.relativeSlotIsEBB mbFirstSlot
-    entries <- Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
-    return $ map (chunk,) entries
+    Secondary.readAllEntries hasFS 0 chunk (const False) chunkSize firstIsEBB
 
   let flatEntries =
         maybe id (applyStreamTo chunkInfo) to
           . applyStreamFrom chunkInfo from
-          $ concat allEntries
+          $ allEntries
   varEntries <- newTVarIO flatEntries
   varHandle <- newTVarIO (Nothing :: Maybe (Handle h))
 
@@ -583,7 +554,7 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
   let next =
         readTVarIO varEntries >>= \case
           [] -> return IteratorExhausted
-          ((chunk, WithBlockSize size entry) : rest) -> do
+          ((WithBlockSize size entry) : rest) -> do
             atomically $ writeTVar varEntries rest
 
             handle <-
@@ -618,7 +589,7 @@ mkRawBlockIterator hasFS chunkInfo codecConfig checkIntegrity component from to 
       hasNext =
         readTVar varEntries >>= \case
           [] -> return Nothing
-          ((_, WithBlockSize _ entry) : _) ->
+          ((WithBlockSize _ entry) : _) ->
             return $ Just (tipToRealPoint chunkInfo entry)
 
       -- 4. Define the 'iteratorClose' action.
@@ -639,8 +610,8 @@ tipToRealPoint :: ChunkInfo -> Entry blk -> RealPoint blk
 tipToRealPoint ci Secondary.Entry{blockOrEBB, headerHash} =
   RealPoint (ChunkLayout.slotNoOfBlockOrEBB ci blockOrEBB) headerHash
 
-chunksFrom :: ChunkInfo -> StreamFrom blk -> [ChunkNo]
-chunksFrom ci from = iterate nextChunk (chunkForFrom ci from)
+chunksFrom :: ChunkInfo -> StreamFrom blk -> NEL.NonEmpty ChunkNo
+chunksFrom ci from = NEL.iterate nextChunk (chunkForFrom ci from)
  where
   nextChunk (ChunkNo n) = ChunkNo (n + 1)
 
@@ -654,16 +625,16 @@ applyStreamFrom ::
   Eq (HeaderHash blk) =>
   ChunkInfo ->
   StreamFrom blk ->
-  [(ChunkNo, WithBlockSize (Entry blk))] ->
-  [(ChunkNo, WithBlockSize (Entry blk))]
+  [WithBlockSize (Entry blk)] ->
+  [WithBlockSize (Entry blk)]
 applyStreamFrom ci = \case
   StreamFromExclusive GenesisPoint -> id
   StreamFromExclusive (BlockPoint fromSlot fromHash) ->
-    dropWhile $ \(_, WithBlockSize _ e) ->
+    dropWhile $ \(WithBlockSize _ e) ->
       let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
        in eSlot < fromSlot || (eSlot == fromSlot && headerHash e == fromHash)
   StreamFromInclusive (RealPoint fromSlot fromHash) ->
-    dropWhile $ \(_, WithBlockSize _ e) ->
+    dropWhile $ \(WithBlockSize _ e) ->
       let eSlot = ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e)
        in eSlot < fromSlot || (eSlot == fromSlot && headerHash e /= fromHash)
 
@@ -675,10 +646,10 @@ applyStreamFrom ci = \case
 applyStreamTo ::
   ChunkInfo ->
   StreamTo blk ->
-  [(ChunkNo, WithBlockSize (Entry blk))] ->
-  [(ChunkNo, WithBlockSize (Entry blk))]
+  [WithBlockSize (Entry blk)] ->
+  [WithBlockSize (Entry blk)]
 applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
-  takeWhile $ \(_, WithBlockSize _ e) ->
+  takeWhile $ \(WithBlockSize _ e) ->
     ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
 
 tipFromRemote :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
