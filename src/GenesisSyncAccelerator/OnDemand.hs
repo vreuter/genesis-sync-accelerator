@@ -238,9 +238,8 @@ refreshTip ::
   (IOLike m, MonadIO m, ConvertRawHash blk) =>
   OnDemandRuntime m blk h ->
   m ()
-refreshTip OnDemandRuntime{odrConfig = OnDemandConfig{odcRemote, odcTracer}, odrManager, odrState} = do
-  let env = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
-  result <- liftIO $ Remote.fetchTipInfo odcTracer env
+refreshTip odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcTracer}, odrState} = do
+  result <- liftIO $ Remote.fetchTipInfo odcTracer $ getRemoteStorageEnv odr
   case result of
     Left _ -> pure ()
     Right tipInfo ->
@@ -267,18 +266,16 @@ mkOnDemandIterator ::
   NEL.NonEmpty ChunkNo ->
   m (Iterator m blk b)
 mkOnDemandIterator
-  OnDemandRuntime
+  odr@OnDemandRuntime
     { odrConfig =
       cfg@OnDemandConfig
-        { odcRemote
-        , odcHasFS
+        { odcHasFS
         , odcChunkInfo
         , odcCodecConfig
         , odcCheckIntegrity
         , odcTracer
         , odcPrefetchAhead = PrefetchChunksCount numPrefetch
         }
-    , odrManager
     , odrState
     , odrPrefetch
     }
@@ -296,7 +293,7 @@ mkOnDemandIterator
     varPrefetchWindow <- newTVarIO []
 
     let
-      remoteEnv = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
+      remoteEnv = getRemoteStorageEnv odr
       decPin n = if n <= 1 then Nothing else Just (n - 1)
 
       updatePrefetchWindow newWindow = do
@@ -677,3 +674,7 @@ tipFromRemote tip =
     , odtHash = fromRawHash (Proxy @blk) (Remote.rtiHashBytes tip)
     , odtBlockNo = BlockNo (Remote.rtiBlockNo tip)
     }
+
+getRemoteStorageEnv :: OnDemandRuntime m blk h -> Remote.RemoteStorageEnv
+getRemoteStorageEnv OnDemandRuntime{odrManager, odrConfig = OnDemandConfig{odcRemote}} =
+  Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
