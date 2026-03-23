@@ -5,7 +5,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MonoLocalBinds #-}
 {-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -44,7 +43,6 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 import qualified GenesisSyncAccelerator.RemoteStorage as Remote
-import GenesisSyncAccelerator.Tracing (TraceRemoteStorageEvent (..))
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
 import qualified Network.HTTP.Client as HTTP
 import Ouroboros.Consensus.Block
@@ -112,7 +110,6 @@ import System.FS.API
   , removeFile
   , withFile
   )
-import "contra-tracer" Control.Tracer (traceWith)
 
 -- | Configuration for on-demand fetching.
 data OnDemandConfig m blk h = OnDemandConfig
@@ -160,12 +157,11 @@ newOnDemandRuntime ::
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg@OnDemandConfig{odcRemote, odcTracer} = do
   env <- liftIO $ Remote.newRemoteStorageEnv (Remote.rscSrcUrl odcRemote) (Remote.rscDstDir odcRemote)
-  tip <- liftIO $ Remote.fetchTipInfo odcTracer env >>= procTip . fmap tipFromRemoteInfo
-  stateVar <- newTVarIO (OnDemandState Set.empty [] tip)
+  mbTip <-
+    liftIO (either (const Nothing) (Just . tipFromRemoteInfo) <$> Remote.fetchTipInfo odcTracer env)
+  stateVar <- newTVarIO (OnDemandState Set.empty [] mbTip)
   prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
   pure $ OnDemandRuntime cfg (Remote.rseManager env) stateVar prefetch
- where
-  procTip = either (\e -> traceWith odcTracer (TraceDownloadFailure e) >> pure Nothing) (pure . Just)
 
 -- | Internal state tracking which chunks have been downloaded during the current session.
 data OnDemandState blk = OnDemandState
