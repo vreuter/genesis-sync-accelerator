@@ -26,6 +26,7 @@ module GenesisSyncAccelerator.OnDemand
   , onDemandIteratorForRange
   , onDemandIteratorFrom
   , readOnDemandTip
+  , refreshTip
   ) where
 
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
@@ -229,6 +230,23 @@ onDemandIteratorFrom odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcChunkInfo
 
 readOnDemandTip :: IOLike m => OnDemandRuntime m blk h -> STM m (Maybe (OnDemandTip blk))
 readOnDemandTip OnDemandRuntime{odrState} = odsTip <$> readTVar odrState
+
+-- | Re-fetch the tip from the CDN and update the on-demand state.
+-- Failures are silently ignored (already traced by 'fetchTipInfo').
+refreshTip ::
+  forall blk m h.
+  (IOLike m, MonadIO m, ConvertRawHash blk) =>
+  OnDemandRuntime m blk h ->
+  m ()
+refreshTip OnDemandRuntime{odrConfig = OnDemandConfig{odcRemote, odcTracer}, odrManager, odrState} = do
+  let env = Remote.RemoteStorageEnv{Remote.rseManager = odrManager, Remote.rseConfig = odcRemote}
+  result <- liftIO $ Remote.fetchTipInfo odcTracer env
+  case result of
+    Left _ -> pure ()
+    Right tipInfo ->
+      atomically $ do
+        st <- readTVar odrState
+        writeTVar odrState st{odsTip = Just (tipFromRemote tipInfo)}
 
 -- | Creates an iterator that downloads and serves chunks one by one,
 -- with background prefetching of upcoming chunks.
