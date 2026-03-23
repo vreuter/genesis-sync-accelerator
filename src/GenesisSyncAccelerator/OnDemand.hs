@@ -157,8 +157,7 @@ newOnDemandRuntime ::
   m (OnDemandRuntime m blk h)
 newOnDemandRuntime cfg@OnDemandConfig{odcRemote, odcTracer} = do
   env <- liftIO $ Remote.newRemoteStorageEnv (Remote.rscSrcUrl odcRemote) (Remote.rscDstDir odcRemote)
-  mbTip <-
-    liftIO (either (const Nothing) (Just . tipFromRemoteInfo) <$> Remote.fetchTipInfo odcTracer env)
+  mbTip <- liftIO $ tipFromRemoteEnv odcTracer env
   stateVar <- newTVarIO (OnDemandState Set.empty [] mbTip)
   prefetch <- liftIO $ PrefetchState <$> newMVar (PrefetchJobs Map.empty Map.empty)
   pure $ OnDemandRuntime cfg (Remote.rseManager env) stateVar prefetch
@@ -235,13 +234,10 @@ refreshTip ::
   OnDemandRuntime m blk h ->
   m ()
 refreshTip odr@OnDemandRuntime{odrConfig = OnDemandConfig{odcTracer}, odrState} = do
-  result <- liftIO $ Remote.fetchTipInfo odcTracer $ getRemoteStorageEnv odr
-  case result of
-    Left _ -> pure ()
-    Right tipInfo ->
-      atomically $ do
-        st <- readTVar odrState
-        writeTVar odrState st{odsTip = Just (tipFromRemoteInfo tipInfo)}
+  mbTip <- liftIO $ tipFromRemoteEnv odcTracer $ getRemoteStorageEnv odr
+  case mbTip of
+    Nothing -> pure ()
+    _ -> atomically $ readTVar odrState >>= \st -> writeTVar odrState st{odsTip = mbTip}
 
 -- | Creates an iterator that downloads and serves chunks one by one,
 -- with background prefetching of upcoming chunks.
@@ -662,6 +658,14 @@ applyStreamTo ::
 applyStreamTo ci (StreamToInclusive (RealPoint toSlot _toHash)) =
   takeWhile $ \(WithBlockSize _ e) ->
     ChunkLayout.slotNoOfBlockOrEBB ci (blockOrEBB e) <= toSlot
+
+tipFromRemoteEnv ::
+  forall blk.
+  ConvertRawHash blk =>
+  Remote.RemoteStorageTracer IO ->
+  Remote.RemoteStorageEnv ->
+  IO (Maybe (OnDemandTip blk))
+tipFromRemoteEnv tr env = either (const Nothing) (Just . tipFromRemoteInfo) <$> Remote.fetchTipInfo tr env
 
 tipFromRemoteInfo :: forall blk. ConvertRawHash blk => Remote.RemoteTipInfo -> OnDemandTip blk
 tipFromRemoteInfo info =
