@@ -9,7 +9,7 @@ module ChunkUploader
   ) where
 
 import ChunkUploader.Detection (scanCompletedChunks)
-import ChunkUploader.S3 (S3Handle, credentialsWork, initS3, uploadChunkFile)
+import ChunkUploader.S3 (S3Handle, credentialsWork, initS3, uploadChunkTriplet)
 import ChunkUploader.State
   ( defaultStateFile
   , loadState
@@ -19,7 +19,6 @@ import ChunkUploader.Types
   ( ChunkNo
   , TraceUploaderEvent (..)
   , UploaderConfig (..)
-  , chunkExtensions
   )
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeAsyncException (..), SomeException, fromException, throwIO, try)
@@ -32,23 +31,22 @@ import "contra-tracer" Control.Tracer (Tracer, traceWith)
 maxRetries :: Int
 maxRetries = 3
 
--- | Base delay for exponential backoff, in microseconds (1 second).
-baseBackoffMicros :: Int
-baseBackoffMicros = 1_000_000
+-- | Initial retry delay, in seconds.
+initialRetryDelaySecs :: Int
+initialRetryDelaySecs = 1
 
--- | Maximum backoff delay, in microseconds (30 seconds).
-maxBackoffMicros :: Int
-maxBackoffMicros = 30_000_000
+-- | Maximum retry delay, in seconds.
+maxRetryDelaySecs :: Int
+maxRetryDelaySecs = 30
+
+-- | Delay for a given retry attempt using exponential backoff.
+delayForAttempt :: Int -> IO ()
+delayForAttempt attempt = threadDelay $ 1_000_000 * min maxRetryDelaySecs (initialRetryDelaySecs * 2 ^ attempt)
 
 -- | Run the main upload loop. This function does not return.
 runUploader :: Tracer IO TraceUploaderEvent -> UploaderConfig -> IO ()
 runUploader tracer cfg = do
-  result <- initS3 cfg
-  s3 <- case result of
-    Left err -> do
-      traceWith tracer (TraceS3InitFailure err)
-      exitFailure
-    Right h -> pure h
+  s3 <- initS3 cfg >>= either (\e -> traceWith tracer (TraceS3InitFailure e) >> exitFailure) pure
   ok <- credentialsWork s3
   unless ok $ do
     traceWith tracer (TraceCredentialValidationFailure "HeadBucket request failed")
@@ -104,29 +102,19 @@ uploadChunkWithRetry ::
   Int ->
   IO Bool
 uploadChunkWithRetry tracer s3 cfg cn attempt = do
-  result <- try $ mapM_ (\ext -> uploadOneFile tracer s3 cn ext (ucImmutableDir cfg)) chunkExtensions
+  traceWith tracer (TraceUploadStart cn)
+  result <- try $ uploadChunkTriplet s3 cn (ucImmutableDir cfg)
   case result of
-    Right () -> pure True
+    Right () -> do
+      traceWith tracer (TraceUploadSuccess cn)
+      pure True
     Left (e :: SomeException)
       | Just (SomeAsyncException _) <- fromException e -> throwIO e
       | otherwise -> do
           traceWith tracer (TraceUploadFailure cn (show e) (show attempt))
           if attempt < maxRetries
             then do
+              delayForAttempt attempt
               traceWith tracer (TraceUploadRetry cn (attempt + 1))
-              -- Exponential backoff: 1s, 2s, 4s. Max 30s.
-              threadDelay (min maxBackoffMicros (baseBackoffMicros * (2 ^ attempt)))
               uploadChunkWithRetry tracer s3 cfg cn (attempt + 1)
             else pure False
-
-uploadOneFile ::
-  Tracer IO TraceUploaderEvent ->
-  S3Handle ->
-  ChunkNo ->
-  String ->
-  FilePath ->
-  IO ()
-uploadOneFile tracer s3 cn ext localDir = do
-  traceWith tracer (TraceUploadStart cn ext)
-  uploadChunkFile s3 cn ext localDir
-  traceWith tracer (TraceUploadSuccess cn ext)

@@ -17,10 +17,12 @@ import Text.Read (readMaybe)
 -- | Scan the immutable directory and return all completed chunk numbers.
 --
 -- A chunk N is considered complete when:
--- 1. Chunk N+1's .chunk file exists (proving N has been finalized)
+-- 1. Chunk N+1's .chunk file exists (proving N has been finalized. The
+--    ImmutableDB always creates index files alongside chunk files, so the
+--    presence of the next .chunk file means all files should exist for chunk N).
 -- 2. All three files (.chunk, .primary, .secondary) for N exist and are non-empty
 --
--- The highest-numbered chunk is never returned, as it contains the tip and my still
+-- The highest-numbered chunk is never returned, as it contains the tip and may still
 -- be extended with additional blocks.
 scanCompletedChunks :: FilePath -> IO [ChunkNo]
 scanCompletedChunks dir = do

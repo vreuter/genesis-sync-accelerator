@@ -29,6 +29,15 @@ let
           ghcOptions = [ "-Werror" ];
         }
       ))
+      # amazonka 2.0 packages re-export duplicate record fields from
+      # multiple constructors, which GHC 9.6 rejects by default.
+      {
+        packages.amazonka.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
+        packages.amazonka-core.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
+        packages.amazonka-s3.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
+        packages.amazonka-sso.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
+        packages.amazonka-sts.components.library.ghcOptions = [ "-XDuplicateRecordFields" ];
+      }
     ];
     flake.variants = {
       profiled = {

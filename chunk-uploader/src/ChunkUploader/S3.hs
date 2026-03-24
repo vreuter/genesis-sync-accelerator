@@ -7,6 +7,7 @@ module ChunkUploader.S3
   , initS3
   , credentialsWork
   , uploadChunkFile
+  , uploadChunkTriplet
   , chunkExistsOnS3
   ) where
 
@@ -63,16 +64,21 @@ initS3 cfg = do
         , s3Prefix = ucS3Prefix cfg
         }
 
--- | Check S3 credentials by performing a HeadBucket request.
-credentialsWork :: S3Handle -> IO Bool
-credentialsWork h = do
-  let req = S3.newHeadBucket (s3Bucket h)
-  result <- try $ Amazonka.runResourceT (Amazonka.send (s3Env h) req)
+-- | Try an IO action, returning 'True' on success and 'False' on
+-- synchronous exceptions. Async exceptions are re-thrown.
+trySync :: IO a -> IO Bool
+trySync action = do
+  result <- try action
   case result of
     Right _ -> pure True
     Left (e :: SomeException)
       | Just (SomeAsyncException _) <- fromException e -> throwIO e
       | otherwise -> pure False
+
+-- | Check S3 credentials by performing a HeadBucket request.
+credentialsWork :: S3Handle -> IO Bool
+credentialsWork h =
+  trySync $ Amazonka.runResourceT (Amazonka.send (s3Env h) (S3.newHeadBucket (s3Bucket h)))
 
 -- | Upload a single chunk file to S3.
 uploadChunkFile :: S3Handle -> ChunkNo -> String -> FilePath -> IO ()
@@ -85,6 +91,11 @@ uploadChunkFile h cn ext localDir = do
   Amazonka.runResourceT $ do
     _ <- Amazonka.send (s3Env h) req
     pure ()
+
+-- | Upload all three files (.chunk, .primary, .secondary) for a chunk.
+uploadChunkTriplet :: S3Handle -> ChunkNo -> FilePath -> IO ()
+uploadChunkTriplet h cn localDir =
+  mapM_ (\ext -> uploadChunkFile h cn ext localDir) chunkExtensions
 
 -- | Parse an endpoint URL into (useTLS, host, port).
 parseEndpoint :: Text -> Either Text (Bool, BS.ByteString, Int)
@@ -108,12 +119,9 @@ parseEndpoint url =
 -- | Check if a chunk's .chunk file already exists on S3.
 -- Used for startup reconciliation.
 chunkExistsOnS3 :: S3Handle -> ChunkNo -> IO Bool
-chunkExistsOnS3 h cn = do
-  let key = S3.ObjectKey (s3Prefix h <> T.pack (chunkFileName cn (head chunkExtensions)))
-      req = S3.newHeadObject (s3Bucket h) key
-  result <- try $ Amazonka.runResourceT (Amazonka.send (s3Env h) req)
-  case result of
-    Right _ -> pure True
-    Left (e :: SomeException)
-      | Just (SomeAsyncException _) <- fromException e -> throwIO e
-      | otherwise -> pure False
+chunkExistsOnS3 h cn =
+  let ext = case chunkExtensions of
+        (e : _) -> e
+        [] -> error "chunkExtensions must be non-empty"
+      key = S3.ObjectKey (s3Prefix h <> T.pack (chunkFileName cn ext))
+   in trySync $ Amazonka.runResourceT (Amazonka.send (s3Env h) (S3.newHeadObject (s3Bucket h) key))

@@ -1,5 +1,4 @@
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module ChunkUploader.Types
   ( UploaderConfig (..)
@@ -10,12 +9,7 @@ module ChunkUploader.Types
   ) where
 
 import Data.Text (Text)
-import Data.Word (Word64)
-
--- | Newtype for chunk numbers (vendored to avoid dependence on ouroboros-consensus types)
-newtype ChunkNo = ChunkNo {unChunkNo :: Word64}
-  deriving stock (Eq, Ord, Show)
-  deriving newtype (Num, Enum, Real, Integral)
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 
 -- | Configuration for the chunk uploader.
 data UploaderConfig = UploaderConfig
@@ -41,8 +35,8 @@ data UploaderConfig = UploaderConfig
 data TraceUploaderEvent
   = TraceScanStart
   | TraceScanComplete ![ChunkNo]
-  | TraceUploadStart !ChunkNo !String
-  | TraceUploadSuccess !ChunkNo !String
+  | TraceUploadStart !ChunkNo
+  | TraceUploadSuccess !ChunkNo
   | TraceUploadFailure !ChunkNo !String !String
   | TraceUploadRetry !ChunkNo !Int
   | TraceStateLoaded !(Maybe ChunkNo)
