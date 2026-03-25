@@ -122,6 +122,14 @@ PIDS+=($MINIO_PID)
 wait_for_minio "$MINIO_PORT" 15
 setup_minio_bucket "$MINIO_PORT" "$MINIO_USER" "$MINIO_PASS" "$BUCKET" "$MC_CONFIG"
 
+# In demo mode, enable S3 API request tracing so the MinIO pane shows activity.
+if demo_is_active; then
+  MC_CONFIG_DIR="$MC_CONFIG" mc admin trace local --verbose >>"$TMPDIR/minio.log" 2>&1 &
+  TRACE_PID=$!
+  PIDS+=($TRACE_PID)
+  echo "  MinIO API tracing enabled"
+fi
+
 # ── Start cardano-node ───────────────────────────────────────────────────────
 
 echo ""
