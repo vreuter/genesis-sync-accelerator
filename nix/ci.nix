@@ -11,14 +11,14 @@ let
       projectHsPkgs = haskellLib.selectProjectPackages hsPkgs.hsPkgs;
       noCross = buildSystem == hsPkgs.pkgs.stdenv.hostPlatform.system;
 
-      isCardanoExe =
+      isProjectExe =
         p:
         let
           i = p.identifier;
         in
-        i.name == "genesis-sync-accelerator" && i.component-type == "exe";
+        (i.name == "genesis-sync-accelerator" || i.name == "chunk-uploader") && i.component-type == "exe";
       setGitRevs = lib.mapAttrsRecursiveCond (as: !lib.isDerivation as) (
-        _: p: if isCardanoExe p then pkgs.set-git-rev p else p
+        _: p: if isProjectExe p then pkgs.set-git-rev p else p
       );
     in
     {
@@ -26,7 +26,7 @@ let
       checks = haskellLib.mkFlakeChecks (haskellLib.collectChecks' projectHsPkgs);
       exes = setGitRevs (
         lib.mapAttrs' (_: p: lib.nameValuePair p.identifier.component-name p) (
-          lib.filterAttrs (_: isCardanoExe) (haskellLib.mkFlakePackages projectHsPkgs)
+          lib.filterAttrs (_: isProjectExe) (haskellLib.mkFlakePackages projectHsPkgs)
         )
       );
     }

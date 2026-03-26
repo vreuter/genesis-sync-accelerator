@@ -1,0 +1,47 @@
+cabal-version: 3.4
+name: chunk-uploader
+version: 0.1.0.0
+license: Apache-2.0
+author: Modus Create, LLC.
+maintainer: cardano-gsa@tweag.io
+build-type: Simple
+
+executable chunk-uploader
+  main-is: Main.hs
+  hs-source-dirs:
+    app
+    src
+
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wpartial-fields
+    -Widentities
+    -Wredundant-constraints
+    -Wmissing-export-lists
+    -Wunused-packages
+    -threaded
+    -rtsopts
+
+  other-modules:
+    ChunkUploader
+    ChunkUploader.Detection
+    ChunkUploader.S3
+    ChunkUploader.State
+    ChunkUploader.Types
+
+  build-depends:
+    amazonka,
+    amazonka-s3,
+    base,
+    bytestring,
+    contra-tracer,
+    directory,
+    filepath,
+    http-client,
+    optparse-applicative,
+    ouroboros-consensus,
+    text,
+    with-utf8,
