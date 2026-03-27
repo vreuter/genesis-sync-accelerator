@@ -34,7 +34,7 @@ import Ouroboros.Consensus.Block
   )
 import Ouroboros.Consensus.Cardano.Block (CardanoBlock, CardanoEras, StandardCrypto)
 import Ouroboros.Consensus.HardFork.Combinator.AcrossEras (OneEraHash)
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks
   ( ChunkInfo (..)
   , ChunkSize (..)
   )

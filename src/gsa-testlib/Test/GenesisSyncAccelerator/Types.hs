@@ -7,7 +7,7 @@ module Test.GenesisSyncAccelerator.Types
   ) where
 
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount, PrefetchChunksCount)
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo)
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
 
 newtype ConfigFile = ConfigFile {unConfigFile :: FilePath} deriving Show
 
