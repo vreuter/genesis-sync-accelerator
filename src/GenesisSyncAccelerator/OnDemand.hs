@@ -71,7 +71,8 @@ import Ouroboros.Consensus.Storage.ImmutableDB.API
   ( Iterator (..)
   , IteratorResult (..)
   )
-import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkInfo, ChunkNo (..))
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks (ChunkInfo)
+import Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Internal (ChunkNo (..))
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Chunks.Layout as ChunkLayout
 import qualified Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Primary as Primary
 import Ouroboros.Consensus.Storage.ImmutableDB.Impl.Index.Secondary (Entry (..))
