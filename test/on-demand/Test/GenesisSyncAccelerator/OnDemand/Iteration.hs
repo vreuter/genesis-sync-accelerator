@@ -301,18 +301,80 @@ prop_onDemandIteratorFromIsCorrectWhenStartingBetweenSlotNumbersWithinChain =
         return $ conjoin props
  where
   myGen = do
-    (bs, sz) <- genBlocksAndChunkSize
-    let extantSlots = map blockSlot bs
-        slotOptions =
-          foldr (\(a, b) acc -> if a - b == 1 then acc else [a .. b] ++ acc) [] $
-            zip (drop 1 extantSlots) extantSlots
-    extraSlot <- elements slotOptions
-    extraHash <- arbitrary
-    extraValid <- arbitrary
-    return (bs, sz, unsafeTestBlock extraHash extraSlot extraValid)
+    let offset xs = zip (drop 1 xs) xs
+        getSlots = map blockSlot
+        getDiffs = map (\(b, a) -> b - a) . offset
+    (bs, sz) <- genBlocksAndChunkSize `suchThat` (\(bs, _) -> any (> 1) (getDiffs $ getSlots bs))
+    let slotOptions = concatMap (\(b, a) -> if b - a <= 1 then [] else [(a + 1) .. (b - 1)]) $ offset $ getSlots bs
+    case slotOptions of
+      -- Need at least 1 from which to call elements
+      [] -> do
+        error $ "Failed to generate slotOptions; slots: " ++ show (getSlots bs)
+      _ -> do
+        extraSlot <- elements slotOptions
+        extraHash <- arbitrary
+        extraValid <- arbitrary
+        return (bs, sz, unsafeTestBlock extraHash extraSlot extraValid)
 
 prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeaderHash :: Property
-prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeaderHash = undefined
+prop_onDemandIteratorFromIsCorrectWhenStartingWithSlotNumberOnChainButWrongHeaderHash =
+  noShrinking $ forAll myGen $ \(blocks, chunkSize, nonExistentBlock, blockChangedIndex) ->
+    ioProperty $
+      withTemp $ \tmp -> do
+        let chunkInfo = UniformChunkSize chunkSize
+            chunkedBlocks =
+              foldr
+                ( \b acc ->
+                    Map.insertWith (\_ old -> b : old) (ChunkLayout.chunkIndexOfSlot chunkInfo (blockSlot b)) [b] acc
+                )
+                Map.empty
+                blocks
+        forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
+        runtime <-
+          let cfg =
+                OnDemandConfig
+                  { odcRemote =
+                      RemoteStorageConfig{rscSrcUrl = getLocalUrl (1 + 2 ^ (16 :: Int)), rscDstDir = tmp}
+                  , odcTracer = nullTracer
+                  , odcChunkInfo = chunkInfo
+                  , odcHasFS = fpToHasFS tmp
+                  , odcCodecConfig = TB.TestBlockCodecConfig
+                  , odcCheckIntegrity = const True
+                  , odcMaxCachedChunks = MaxCachedChunksCount . fromIntegral $ Map.size chunkedBlocks
+                  , odcPrefetchAhead = PrefetchChunksCount 0
+                  }
+           in OnDemand.newOnDemandRuntime cfg
+        state <- readTVarIO $ odrState runtime
+        atomically $
+          writeTVar
+            (odrState runtime)
+            state{odsCachedChunks = Map.keysSet chunkedBlocks}
+        obsFromInclusive <-
+          OnDemand.onDemandIteratorFrom
+            runtime
+            GetHash
+            (StreamFromInclusive $ blockRealPoint nonExistentBlock)
+            >>= iteratorToList
+        obsFromExclusive <-
+          OnDemand.onDemandIteratorFrom
+            runtime
+            GetHash
+            (StreamFromExclusive $ blockPoint nonExistentBlock)
+            >>= iteratorToList
+        let hashes = map blockHash blocks
+        return $
+          conjoin
+            [ obsFromInclusive === drop (blockChangedIndex + 1) hashes
+            , obsFromExclusive === drop blockChangedIndex hashes
+            ]
+ where
+  myGen = do
+    (bs, sz) <- genBlocksAndChunkSize
+    blockIndex <- chooseInt (0, length bs - 1)
+    let b = bs !! blockIndex
+    newHash <- arbitrary `suchThat` (/= blockHash b)
+    let newBlock = unsafeTestBlock newHash (blockSlot b) (tbValid b)
+    return $ (bs, sz, newBlock, blockIndex)
 
 instance Arbitrary SlotNo where
   arbitrary = SlotNo <$> arbitrary
