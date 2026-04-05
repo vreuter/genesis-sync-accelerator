@@ -73,7 +73,7 @@ import System.FS.API.Types (Handle)
 import System.FS.CRC (CRC, hPutAllCRC)
 import System.FilePath ((</>))
 import qualified System.IO.Temp as Temp
-import Test.GenesisSyncAccelerator.Utilities (getBlockChunk, getLocalUrl)
+import Test.GenesisSyncAccelerator.Utilities (getBlockChunk, getLocalUrl, groupBlocksByChunk)
 import Test.QuickCheck
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
@@ -94,13 +94,7 @@ prop_fullIterationOverChainHeadersRecapitulatesInput =
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
         forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
           let cfg =
@@ -134,13 +128,7 @@ prop_onDemandIteratorFromIsCorrectForStreamFromInclusive =
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
         forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
           let cfg =
@@ -174,13 +162,7 @@ prop_onDemandIteratorFromIsCorrectForStreamFromExclusive =
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
         forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
           let cfg =
@@ -215,13 +197,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockButWithinSameChunk 
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
             maxChunk = maximum (Map.keys chunkedBlocks)
         forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
@@ -258,13 +234,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockButWithinSameChun
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
             maxChunk = maximum (Map.keys chunkedBlocks)
         forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
@@ -312,13 +282,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
             maxChunk = maximum (Map.keys chunkedBlocks)
         forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
@@ -364,13 +328,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk =
     ioProperty $
       withTemp $ \tmp -> do
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
             maxChunk = maximum (Map.keys chunkedBlocks)
         forM_ (map ChunkNo [0 .. (unChunkNo maxChunk)]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
@@ -424,13 +382,7 @@ prop_onDemandIteratorFromErrorsWhenStartingBetweenSlotNumbersWithinChain =
         when (blockSlot nonExistentBlock `elem` map blockSlot blocks) $
           error "Precondition violation: generated start block with slot already in use"
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
         forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
           let cfg =
@@ -494,13 +446,7 @@ prop_onDemandIteratorFromErrorsWhenStartingWithSlotNumberOnChainButWrongHeaderHa
               error
                 "Precondition violation: generated start block with used slot but same header hash as already present there"
         let chunkInfo = UniformChunkSize chunkSize
-            chunkedBlocks =
-              foldr
-                ( \b acc ->
-                    Map.insertWith (\_ old -> b : old) (getBlockChunk chunkInfo b) [b] acc
-                )
-                Map.empty
-                blocks
+            chunkedBlocks = groupBlocksByChunk chunkInfo blocks
         forM_ (map ChunkNo [0 .. (unChunkNo (maximum (Map.keys chunkedBlocks)))]) $ \cn -> writeBlocks tmp cn (Map.findWithDefault [] cn chunkedBlocks)
         runtime <-
           let cfg =

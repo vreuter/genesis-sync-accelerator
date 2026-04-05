@@ -162,6 +162,7 @@ library gsa-testlib
 
   build-depends:
     QuickCheck,
+    containers,
     contra-tracer,
     filepath,
     fs-api,

@@ -12,12 +12,14 @@ module Test.GenesisSyncAccelerator.Utilities
   , getCurrentFilenamesForChunk
   , getLocalUrl
   , getTopLevelConfigFilePath
+  , groupBlocksByChunk
   , ioQuickly
   , mkFullConfig
   , testWithFileServer
   , tracerToFile
   ) where
 
+import qualified Data.Map as Map
 import qualified Data.Text as Text
 import GenesisSyncAccelerator.OnDemand (OnDemandConfig (..))
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
@@ -79,6 +81,9 @@ getLocalUrl port = "http://localhost:" ++ show port
 
 getTopLevelConfigFilePath :: IO FilePath
 getTopLevelConfigFilePath = getDataFileName $ "test" </> "data" </> "config" </> "config.json"
+
+groupBlocksByChunk :: HasHeader blk => ChunkInfo -> [blk] -> Map.Map ChunkNo [blk]
+groupBlocksByChunk ci = foldr (\b acc -> Map.insertWith (\_ old -> b : old) (getBlockChunk ci b) [b] acc) Map.empty
 
 ioQuickN :: forall prop. Testable prop => Int -> IO prop -> Property
 ioQuickN n = withMaxSuccess n . ioProperty
