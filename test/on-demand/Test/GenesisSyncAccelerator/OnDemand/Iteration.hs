@@ -547,7 +547,8 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenBothBoundsAreBelowFirstChunk =
         genBlock =
           choose (0, maxSlotRaw) >>= \s -> uncurry (unsafeTestBlock (SlotNo s)) <$> (arbitrary :: Gen (TestHash, Validity))
     (b1, b2) <- ((,) <$> genBlock <*> genBlock) `suchThat` (\(b, b') -> blockSlot b /= blockSlot b')
-    return (bs, sz, if blockSlot b1 > blockSlot b2 then (b2, b1) else (b1, b2))
+    -- Deliberately ignore the fact that extra blocks may be flipped; we want to test invariance against flipping the order of the bounds.
+    return (bs, sz, (b1, b2))
 
 instance Arbitrary SlotNo where
   arbitrary = SlotNo <$> arbitrary
