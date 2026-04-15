@@ -743,7 +743,7 @@ prop_onDemandIteratorForRangeIsCorrectWhenGivenTwoValidBoundsWithLowerEqualToUpp
  where
   myGen = do
     (bs, ci) <- genBlocksAndChunkInfo `suchThat` ((> 1) . length . fst)
-    i <- choose (0, length bs - 1)
+    i <- chooseInt (0, length bs - 1)
     return (bs, ci, i)
 
 -- LastChunkNotAvailable is expected here.
@@ -792,7 +792,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsButUpperBoundChu
 prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChunkExistsButNotUpperBoundBlockItself ::
   Property
 prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChunkExistsButNotUpperBoundBlockItself =
-  withMaxSuccess 500 $ forAll myGen $ \(blocks, chunkInfo, (blockFrom, blockTo)) ->
+  forAll myGen $ \(blocks, chunkInfo, (blockFrom, blockTo)) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkedBlocks = groupBlocksByChunk chunkInfo blocks
