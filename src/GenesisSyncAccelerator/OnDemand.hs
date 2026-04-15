@@ -32,7 +32,7 @@ module GenesisSyncAccelerator.OnDemand
 import Control.Concurrent.Async (Async, async, cancelMany, poll, waitCatch)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, putMVar, takeMVar)
 import Control.Exception (Exception, throw)
-import Control.Monad (unless, void, when)
+import Control.Monad (unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.Bifunctor as Bifunctor
 import Data.ByteString.Lazy (ByteString)
@@ -396,11 +396,12 @@ mkOnDemandIterator
                   ok <- ensureChunkAvailable c
                   if not ok
                     then do
-                      -- TODO: need to handle cases where an interior chunk in the iteration is problematic
                       cleanupOnError
-                      when (c == NEL.head chunks) $ throw (FirstChunkNotAvailable from c)
-                      maybe (pure ()) (\to -> when (isLastChunk c) $ throw (LastChunkNotAvailable to c)) mbTo
-                      return IteratorExhausted
+                      if c == NEL.head chunks
+                        then throw (FirstChunkNotAvailable from c)
+                        else case mbTo of
+                          Nothing -> pure IteratorExhausted
+                          (Just to) -> throw $ if isLastChunk c then LastChunkNotAvailable to c else InteriorChunkNotAvailable c
                     else do
                       it <-
                         mkRawBlockIterator
@@ -649,6 +650,7 @@ chunksFrom ci from = NEL.iterate nextChunk (chunkForFrom ci from)
 data IllegalStreamResult blk
   = StreamBoundNotFound (SlotNo, HeaderHash blk) (Maybe (Entry blk))
   | FirstChunkNotAvailable (StreamFrom blk) ChunkNo
+  | InteriorChunkNotAvailable ChunkNo
   | LastChunkNotAvailable (StreamTo blk) ChunkNo
   deriving (Eq, Show)
 
