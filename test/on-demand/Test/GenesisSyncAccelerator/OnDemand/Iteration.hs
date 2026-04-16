@@ -23,7 +23,7 @@ import qualified Data.Text as Text
 import Data.Word (Word64)
 import GHC.Conc (atomically)
 import GenesisSyncAccelerator.OnDemand
-  ( IllegalStreamResult (StreamBoundNotFound)
+  ( IllegalStreamOperation
   , OnDemandConfig (..)
   , OnDemandRuntime (..)
   , OnDemandState (..)
@@ -242,7 +242,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         -- Start is from after the last (greatest) chunk, so the expected error is about chunk availability.
-        let getExpErr bound = OnDemand.FirstChunkNotAvailable bound (blockChunk chunkInfo extraBlock)
+        let getExpErr bound = OnDemand.firstChunkNotAvailable chunkInfo bound
         conjoin
           <$> traverse
             ( \buildBound -> let b = buildBound extraBlock in checkIterWithStreamFromFails runtime (=== getExpErr b) b
@@ -365,7 +365,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk =
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         -- Start is from before the first (least) chunk, so the expected error is about chunk availability.
-        let getExpErr bound = OnDemand.FirstChunkNotAvailable bound (blockChunk chunkInfo badBlock)
+        let getExpErr = OnDemand.firstChunkNotAvailable chunkInfo
         conjoin
           <$> traverse
             ( \buildBound -> let b = buildBound badBlock in checkIterWithStreamFromFails runtime (=== getExpErr b) b
@@ -545,7 +545,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoes
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive (blockRealPoint blockTo)
-            checkError :: OnDemand.IllegalStreamResult TestBlock -> Property
+            checkError :: IllegalStreamOperation TestBlock -> Property
             checkError (OnDemand.StreamBoundNotFound (obsSlot, obsHash) _) =
               conjoin
                 [ counterexample "stream bound slot" (obsSlot === blockSlot blockFrom)
@@ -614,7 +614,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromSlotIsGreaterThanToSlotButCh
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive (blockRealPoint blockTo)
             -- Validate the error type and that it points to the expected query point.
-            checkError :: OnDemand.IllegalStreamResult TestBlock -> Property
+            checkError :: IllegalStreamOperation TestBlock -> Property
             checkError (OnDemand.StreamBoundNotFound (obsSlot, obsHash) _) =
               conjoin
                 [ obsSlot === blockSlot blockTo
@@ -727,8 +727,8 @@ prop_onDemandIteratorForRangeIsCorrectWhenGivenTwoValidBoundsWithLowerEqualToUpp
                 upperBound
                 >>= iteratorToList
             )
-        let checkError :: OnDemand.IllegalStreamResult TestBlock -> Property
-            checkError (StreamBoundNotFound (s, h) _) =
+        let checkError :: IllegalStreamOperation TestBlock -> Property
+            checkError (OnDemand.StreamBoundNotFound (s, h) _) =
               conjoin
                 [ counterexample "block slot" $ s === blockSlot boundBlock
                 , counterexample "block hash" $ h === blockHash boundBlock
@@ -765,7 +765,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsButUpperBoundChu
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive (blockRealPoint blockTo)
-            expErr = OnDemand.LastChunkNotAvailable (StreamToInclusive $ blockRealPoint blockTo) (getChunk blockTo)
+            expErr = OnDemand.lastChunkNotAvailable chunkInfo (StreamToInclusive $ blockRealPoint blockTo)
         conjoin
           <$> traverse
             ( \buildLowerBound ->
@@ -810,7 +810,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChu
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive (blockRealPoint blockTo)
-            checkError :: OnDemand.IllegalStreamResult TestBlock -> Property
+            checkError :: IllegalStreamOperation TestBlock -> Property
             checkError (OnDemand.StreamBoundNotFound (obsSlot, obsHash) _) =
               conjoin
                 [ counterexample "stream bound slot" (obsSlot === blockSlot blockTo)
@@ -889,13 +889,13 @@ buildersForStreamFrom =
 
 checkIterWithStreamFromFails ::
   OnDemandRuntime IO TestBlock h ->
-  (OnDemand.IllegalStreamResult TestBlock -> Property) ->
+  (IllegalStreamOperation TestBlock -> Property) ->
   StreamFrom TestBlock ->
   IO Property
 checkIterWithStreamFromFails runtime checkError streamBound =
   either checkError (const $ counterexample "Expected error but none occurred" False)
     <$> ( try (OnDemand.onDemandIteratorFrom runtime (GetPure ()) streamBound >>= iteratorToList) ::
-            IO (Either (OnDemand.IllegalStreamResult TestBlock) [()])
+            IO (Either (IllegalStreamOperation TestBlock) [()])
         )
 
 -- | Canonical point is pair of slot number and hash.
