@@ -12,7 +12,7 @@ module Test.GenesisSyncAccelerator.OnDemand.Iteration (tests) where
 import Cardano.Slotting.Slot (SlotNo (..))
 import qualified Codec.CBOR.Write as CBOR
 import Codec.Serialise (Serialise (encode))
-import Control.Exception (SomeException, try)
+import Control.Exception (try)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Catch (MonadMask)
 import Control.Monad.IO.Class (MonadIO)
@@ -32,6 +32,7 @@ import qualified GenesisSyncAccelerator.OnDemand as OnDemand
 import GenesisSyncAccelerator.RemoteStorage (FileType (..), RemoteStorageConfig (..), getFileName)
 import GenesisSyncAccelerator.Types (MaxCachedChunksCount (..), PrefetchChunksCount (..))
 import GenesisSyncAccelerator.Util (fpToHasFS)
+import Ouroboros.Consensus.Block (StandardHash)
 import Ouroboros.Consensus.Block.Abstract
   ( ConvertRawHash
   , GetHeader (..)
@@ -242,7 +243,7 @@ prop_onDemandIteratorFromErrorsWhenStartingFromAfterLastBlockAndInAnotherChunk =
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         -- Start is from after the last (greatest) chunk, so the expected error is about chunk availability.
-        let getExpErr bound = OnDemand.firstChunkNotAvailable chunkInfo bound
+        let getExpErr = OnDemand.firstChunkNotAvailable chunkInfo
         conjoin
           <$> traverse
             ( \buildBound -> let b = buildBound extraBlock in checkIterWithStreamFromFails runtime (=== getExpErr b) b
@@ -385,20 +386,17 @@ prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk =
 -- OnDemand.onDemandIteratorForRange ---------------------------------------------------------------------------------
 ----------------------------------------------------------------------------------------------------------------------
 
--- The determination of which chunks are needed for the stream should fail here.
-prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromChunkIsGreaterThanToChunk ::
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenStreamBoundHashesMatchAndLowerBoundIsExclusive ::
   Property
-prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromChunkIsGreaterThanToChunk =
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenStreamBoundHashesMatchAndLowerBoundIsExclusive =
   forAll myGen $ \(blocks, chunkInfo, (blockFrom, blockTo)) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkedBlocks = groupBlocksByChunk chunkInfo blocks
-            chunkFrom = blockChunk chunkInfo blockFrom
-            chunkTo = blockChunk chunkInfo blockTo
-        unless (chunkFrom > chunkTo) $
-          error $
-            "Precondition violation: generated blockFrom's chunk is not actually after blockTo's: "
-              ++ show (chunkFrom, chunkTo)
+        unless (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks do not have the same hash"
+        unless (blockSlot blockFrom < blockSlot blockTo) $
+          error "Precondition violation: lower bound block is not before upper bound block"
         writeChunkFiles tmp chunkedBlocks
         runtime <- makeRuntimeWithNullRemoteAndNullLogging tmp chunkInfo chunkedBlocks
         state <- readTVarIO $ odrState runtime
@@ -407,20 +405,68 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromChunkIsGreaterThanToChunk =
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive (blockRealPoint blockTo)
-            -- The exception comes directly from a call to error; check the message content.
-            checkError :: StreamFrom blk -> SomeException -> Property
-            checkError _ e =
-              let getRawChunk = unChunkNo . blockChunk chunkInfo
-                  bounds = (getRawChunk blockFrom, getRawChunk blockTo)
-                  expPrefix = "Illegal chunk range bounds: " ++ show bounds
-               in counterexample ("expPrefix: " ++ expPrefix ++ ", actual error: " ++ show e) $
-                    expPrefix `List.isPrefixOf` show e
+            lowerBound = StreamFromExclusive (blockPoint blockFrom)
+        either
+          (checkStreamBoundsError lowerBound upperBound)
+          (const $ counterexample "Expected error but got successful result" False)
+          <$> try
+            (OnDemand.onDemandIteratorForRange runtime (GetPure ()) lowerBound upperBound >>= iteratorToList)
+ where
+  myGen = do
+    -- Generate the blocks such that if the lower bound block is in the lowest chunk,
+    -- there's still room for the upper bound chunk to be below it (i.e., in the chunk not yet populated).
+    (bs, ci) <- genBlocksAndChunkInfoWithRoomForLowChunk `suchThat` ((> 1) . length . fst)
+    let getRawChunk = unChunkNo . blockChunk ci
+        maxRawChunk = maximum (map getRawChunk bs) + 1 -- Allow going just above the extant chunks if necessary.
+        genAtLeastLowerExtant = do
+          lowerBlock <- elements bs
+          upperBlock <-
+            genBlockFromGenSlot $
+              SlotNo <$> choose (1 + blockRawSlot lowerBlock, numSlotsPerChunk ci * (maxRawChunk + 1) - 1)
+          return (lowerBlock, modifyBlockHash upperBlock (blockHash lowerBlock))
+        genAtLeastUpperExtant = do
+          upperBlock <- elements bs
+          lowerBlock <- genBlockFromGenSlot $ SlotNo <$> choose (0, blockRawSlot upperBlock - 1)
+          return (modifyBlockHash lowerBlock (blockHash upperBlock), upperBlock)
+        genMaybeNeitherExtant = do
+          lowerBlock <-
+            genBlockFromGenSlot $ SlotNo <$> choose (0, numSlotsPerChunk ci * (maxRawChunk + 1) - 2)
+          upperBlock <-
+            genBlockFromGenSlot $
+              SlotNo <$> choose (blockRawSlot lowerBlock + 1, numSlotsPerChunk ci * (maxRawChunk + 1) - 1)
+          return (lowerBlock, modifyBlockHash upperBlock (blockHash lowerBlock))
+    (b', b'') <-
+      oneof
+        [ genAtLeastLowerExtant
+        , genAtLeastUpperExtant
+        , genMaybeNeitherExtant
+        ]
+    return (bs, ci, (b', b''))
+
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsAfterUpperBound :: Property
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsAfterUpperBound =
+  forAll myGen $ \(blocks, chunkInfo, (blockFrom, blockTo)) ->
+    ioProperty $
+      withTemp $ \tmp -> do
+        let chunkedBlocks = groupBlocksByChunk chunkInfo blocks
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
+        unless (blockSlot blockFrom > blockSlot blockTo) $
+          error "Precondition violation: generated blockFrom is not actually after blockTo"
+        writeChunkFiles tmp chunkedBlocks
+        runtime <- makeRuntimeWithNullRemoteAndNullLogging tmp chunkInfo chunkedBlocks
+        state <- readTVarIO $ odrState runtime
+        atomically $
+          writeTVar
+            (odrState runtime)
+            state{odsCachedChunks = Map.keysSet chunkedBlocks}
+        let upperBound = StreamToInclusive (blockRealPoint blockTo)
         conjoin
           <$> traverse
             ( \buildLowerBound ->
                 let lowerBound = buildLowerBound blockFrom
                  in either
-                      (checkError lowerBound)
+                      (checkStreamBoundsError lowerBound upperBound)
                       (const $ counterexample "Expected error but got successful result" False)
                       <$> try
                         (OnDemand.onDemandIteratorForRange runtime (GetPure ()) lowerBound upperBound >>= iteratorToList)
@@ -433,41 +479,45 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromChunkIsGreaterThanToChunk =
     (bs, ci) <- genBlocksAndChunkInfoWithRoomForLowChunk `suchThat` ((> 1) . length . fst)
     let getRawChunk = unChunkNo . blockChunk ci
         maxRawChunk = maximum (map getRawChunk bs) + 1 -- Allow going just above the extant chunks if necessary.
-        -- For each generator, ignore the chunk order of the generated blocks; ensure just that one is
+        -- For each generator, ignore the slot order of the generated blocks; ensure just that one is
         -- greater than the other. Take care of the order in the last step, swapping the blocks as necessary.
-        genExtantPair = ((,) <$> elements bs <*> elements bs) `suchThat` uncurry (/=)
+        genExtantPair =
+          (\b' b'' -> if blockSlot b' > blockSlot b'' then (b', b'') else (b'', b'))
+            <$> elements bs
+            <*> elements bs
         genAtLeastLowerExtant = do
           lowerBlock <- elements bs
-          upperChunk <- ChunkNo <$> choose (getRawChunk lowerBlock, maxRawChunk)
-          upperBlock <- genBlockFromGenSlot $ genSlotForChunk ci upperChunk
+          upperBlock <-
+            genBlockFromGenSlot $
+              SlotNo <$> choose (1 + blockRawSlot lowerBlock, numSlotsPerChunk ci * (maxRawChunk + 1) - 1)
           return (lowerBlock, upperBlock)
         genAtLeastUpperExtant = do
           upperBlock <- elements bs
-          lowerChunk <- ChunkNo <$> choose (0, minimum (map getRawChunk bs) - 1) -- Stay below lowest chunk.
-          lowerBlock <- genBlockFromGenSlot $ genSlotForChunk ci lowerChunk
+          lowerBlock <- genBlockFromGenSlot $ SlotNo <$> choose (0, blockRawSlot upperBlock - 1)
           return (lowerBlock, upperBlock)
         genMaybeNeitherExtant = do
-          c' <- ChunkNo <$> choose (0, maxRawChunk)
-          c'' <- ChunkNo <$> choose (unChunkNo c' + 1, maxRawChunk + 1)
-          b' <- genBlockFromGenSlot $ genSlotForChunk ci c'
-          b'' <- genBlockFromGenSlot $ genSlotForChunk ci c''
+          b' <- genBlockFromGenSlot $ SlotNo <$> choose (0, numSlotsPerChunk ci * (maxRawChunk + 1) - 2)
+          b'' <-
+            genBlockFromGenSlot $
+              SlotNo <$> choose (blockRawSlot b' + 1, numSlotsPerChunk ci * (maxRawChunk + 1) - 1)
           return (b', b'')
     (b', b'') <-
       oneof [genExtantPair, genAtLeastLowerExtant, genAtLeastUpperExtant, genMaybeNeitherExtant]
-        `suchThat` (\(b', b'') -> getRawChunk b' /= getRawChunk b'')
+        `suchThat` (\(b', b'') -> blockHash b' /= blockHash b'')
     -- Take care of the order of the blocks' chunks w.r.t. one another.
-    return (bs, ci, if blockChunk ci b' > blockChunk ci b'' then (b', b'') else (b'', b'))
+    return (bs, ci, if blockSlot b' > blockSlot b'' then (b', b'') else (b'', b'))
 
 -- FirstChunkNotAvailable is expected under this scenario.
-prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunkRegardlessOfUpperBound ::
-  Property
-prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunkRegardlessOfUpperBound =
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunk :: Property
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunk =
   forAll myGen $ \(blocks, chunkInfo, (blockFrom, blockTo)) ->
     ioProperty $
       withTemp $ \tmp -> do
         let getChunk = blockChunk chunkInfo
             chunkFrom = getChunk blockFrom
             minChunk = getMinChunk chunkInfo blocks
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
         unless (chunkFrom < minChunk) $
           error $
             "Precondition violation: generated blockFrom is not actually in a lower chunk than all blocks: "
@@ -519,20 +569,20 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunkRegar
       oneof
         [ elements bs
         , genBlockFromGenSlot $
-            SlotNo
-              <$> choose
-                (1 + blockRawSlot b', numSlotsPerChunk ci * (2 + unChunkNo maxChunk))
+            SlotNo <$> choose (1 + blockRawSlot b', numSlotsPerChunk ci * (2 + unChunkNo maxChunk))
         ]
+        `suchThat` ((/= blockHash b') . blockHash)
     return (bs, ci, (b', b''))
 
 -- StreamBoundNotFound is to be expected here.
-prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoesNotExist ::
-  Property
+prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoesNotExist :: Property
 prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoesNotExist =
   forAll myGen $ \(blocks, chunkInfo, (blockFrom, blockTo)) ->
     ioProperty $
       withTemp $ \tmp -> do
         let chunkedBlocks = groupBlocksByChunk chunkInfo blocks
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
         unless (blockChunk chunkInfo blockFrom `elem` Map.keys chunkedBlocks) $
           error "Precondition violation: generated blockFrom is not actually in an extant chunk"
         when (containsBlockPoint blocks blockFrom) $
@@ -565,7 +615,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoes
  where
   myGen = do
     (bs, ci) <- genBlocksAndChunkInfo
-    let genByModification b = (\h -> unsafeTestBlock (tbSlot b) h (tbValid b)) <$> (arbitrary `suchThat` (/= blockHash b))
+    let genByModification b = modifyBlockHash b <$> (arbitrary `suchThat` (/= blockHash b))
         chunks = map (blockChunk ci) bs
     -- Generate the lower bound block such that it's not part of the chain.
     lowerBoundBlock <-
@@ -576,11 +626,11 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoes
         ]
     -- The only restriction here is that the upper bound block be later in time (greater slot)
     -- than the lower bound block.
+    let minSlotUpper = 1 + blockRawSlot lowerBoundBlock
+        maxSlotUpper = numSlotsPerChunk ci * (1 + unChunkNo (maximum chunks)) - 1
     upperBoundBlock <-
-      genBlockFromGenSlot $
-        SlotNo
-          <$> choose
-            (1 + blockRawSlot lowerBoundBlock, numSlotsPerChunk ci * (1 + unChunkNo (maximum chunks)) - 1)
+      genBlockFromGenSlot (SlotNo <$> choose (minSlotUpper, maxSlotUpper))
+        `suchThat` ((/= blockHash lowerBoundBlock) . blockHash)
     return (bs, ci, (lowerBoundBlock, upperBoundBlock))
 
 -- Here the upper bound won't be found, as it will be passed during the skipping of blocks to reach the lower bound.
@@ -595,6 +645,8 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromSlotIsGreaterThanToSlotButCh
             chunkTo = blockChunk chunkInfo blockTo
             slotFrom = blockSlot blockFrom
             slotTo = blockSlot blockTo
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
         when (chunkFrom /= chunkTo) $
           error $
             "Precondition violation: blockFrom's chunk is not equal to blockTo's: "
@@ -613,20 +665,12 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromSlotIsGreaterThanToSlotButCh
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive (blockRealPoint blockTo)
-            -- Validate the error type and that it points to the expected query point.
-            checkError :: IllegalStreamOperation TestBlock -> Property
-            checkError (OnDemand.StreamBoundNotFound (obsSlot, obsHash) _) =
-              conjoin
-                [ obsSlot === blockSlot blockTo
-                , obsHash === blockHash blockTo
-                ]
-            checkError e = counterexample ("Expected StreamBoundNotFound error but got different error: " ++ show e) False
         conjoin
           <$> traverse
             ( \buildLowerBound ->
                 let lowerBound = buildLowerBound blockFrom
                  in either
-                      checkError
+                      (checkStreamBoundsError lowerBound upperBound)
                       (const $ counterexample "Expected error but got successful result" False)
                       <$> try
                         (OnDemand.onDemandIteratorForRange runtime (GetPure ()) lowerBound upperBound >>= iteratorToList)
@@ -655,6 +699,8 @@ prop_onDemandIteratorForRangeIsCorrectWhenGivenTwoValidBoundsWithLowerStrictlyBe
         let blockFrom = blocks !! iFrom
             blockTo = blocks !! iTo
             chunkedBlocks = groupBlocksByChunk chunkInfo blocks
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
         unless (blockSlot blockFrom < blockSlot blockTo) $
           error $
             "Lower bound must be less than upper bound; block indices: "
@@ -711,6 +757,7 @@ prop_onDemandIteratorForRangeIsCorrectWhenGivenTwoValidBoundsWithLowerEqualToUpp
             (odrState runtime)
             state{odsCachedChunks = Map.keysSet chunkedBlocks}
         let upperBound = StreamToInclusive $ blockRealPoint boundBlock
+            exclusiveLowerBound = StreamFromExclusive $ blockPoint boundBlock
         obsHashesInclusive <-
           OnDemand.onDemandIteratorForRange
             runtime
@@ -723,28 +770,32 @@ prop_onDemandIteratorForRangeIsCorrectWhenGivenTwoValidBoundsWithLowerEqualToUpp
             ( OnDemand.onDemandIteratorForRange
                 runtime
                 GetHash
-                (StreamFromExclusive $ blockPoint boundBlock)
+                exclusiveLowerBound
                 upperBound
                 >>= iteratorToList
             )
-        let checkError :: IllegalStreamOperation TestBlock -> Property
-            checkError (OnDemand.StreamBoundNotFound (s, h) _) =
-              conjoin
-                [ counterexample "block slot" $ s === blockSlot boundBlock
-                , counterexample "block hash" $ h === blockHash boundBlock
-                ]
-            checkError e = counterexample ("Expected StreamBoundNotFound error but got different error: " ++ show e) False
-            checkResult = either checkError (const $ counterexample "Expected error but got successful result" False)
         pure $
           conjoin
             [ counterexample "inclusive bound" $ obsHashesInclusive === [blockHash boundBlock]
-            , counterexample "exclusive bound" $ checkResult obsExclusiveResult
+            , counterexample "exclusive bound" $
+                either
+                  (checkStreamBoundsError exclusiveLowerBound upperBound)
+                  (const $ counterexample "Expected error but got successful result" False)
+                  obsExclusiveResult
             ]
  where
   myGen = do
     (bs, ci) <- genBlocksAndChunkInfo `suchThat` ((> 1) . length . fst)
     i <- chooseInt (0, length bs - 1)
     return (bs, ci, i)
+
+checkStreamBoundsError ::
+  StandardHash blk =>
+  StreamFrom blk -> StreamTo blk -> OnDemand.IllegalStreamOperation blk -> Property
+checkStreamBoundsError expFrom expTo (OnDemand.IllegalStreamBounds obsFrom obsTo) =
+  conjoin
+    [counterexample "lower bound" $ obsFrom === expFrom, counterexample "upper bound" $ obsTo === expTo]
+checkStreamBoundsError _ _ e = counterexample ("Expected IllegalStreamBounds error but got different error: " ++ show e) False
 
 -- LastChunkNotAvailable is expected here.
 prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsButUpperBoundChunkDoesNot ::
@@ -755,6 +806,8 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsButUpperBoundChu
       withTemp $ \tmp -> do
         let getChunk = blockChunk chunkInfo
             chunkedBlocks = groupBlocksByChunk chunkInfo blocks
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
         unless (getChunk blockTo > maximum (map getChunk blocks)) $
           error "Precondition violation: blockTo's chunk isn't greater than max chunk among other blocks. "
         writeChunkFiles tmp chunkedBlocks
@@ -782,10 +835,9 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsButUpperBoundChu
     -- No restriction on the lower bound block; the upper bound block must just be greater in chunk number than all the other blocks.
     (bs, ci) <- genBlocksAndChunkInfo
     b' <- elements bs
+    let upperChunk = ChunkNo (1 + maximum (map (unChunkNo . blockChunk ci) bs))
     b'' <-
-      genBlockFromGenSlot $
-        genSlotForChunk ci $
-          ChunkNo (1 + maximum (map (unChunkNo . blockChunk ci) bs))
+      genBlockFromGenSlot (genSlotForChunk ci upperChunk) `suchThat` ((/= blockHash b') . blockHash)
     return (bs, ci, (b', b''))
 
 -- StreamBoundNotFound is to be expected here.
@@ -796,6 +848,8 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChu
     ioProperty $
       withTemp $ \tmp -> do
         let chunkedBlocks = groupBlocksByChunk chunkInfo blocks
+        when (blockHash blockFrom == blockHash blockTo) $
+          error "Precondition violation: Stream bounding blocks have the same hash"
         unless (containsBlockPoint blocks blockFrom) $
           error "Precondition violation: generated blockFrom is not actually in the blockchain."
         when (containsBlockPoint blocks blockTo) $
@@ -830,7 +884,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChu
  where
   myGen = do
     (bs, ci) <- genBlocksAndChunkInfo `suchThat` ((> 1) . length . fst)
-    let genByModification b = (\h -> unsafeTestBlock (tbSlot b) h (tbValid b)) <$> (arbitrary `suchThat` (/= blockHash b))
+    let genByModification b = modifyBlockHash b <$> (arbitrary `suchThat` (/= blockHash b))
         maxSlot = maximum $ map blockSlot bs
         maxChunk = maximum $ map (blockChunk ci) bs
     b' <- elements bs `suchThat` ((/= maxSlot) . blockSlot) -- Allow room for upper bound block.
@@ -842,7 +896,7 @@ prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundExistsAndUpperBoundChu
         , genBlockFromGenSlot $
             SlotNo <$> choose (1 + unSlotNo s', numSlotsPerChunk ci * (1 + unChunkNo maxChunk) - 1)
         ]
-        `suchThat` (not . containsBlockPoint bs)
+        `suchThat` (\b -> not (containsBlockPoint bs b) && blockHash b /= blockHash b')
     return (bs, ci, (b', b''))
 
 ----------------------------------------------------------------------------------------------------------------------
@@ -981,6 +1035,9 @@ makeRuntimeWithNullRemoteAndNullLogging (TmpDir tmp) chunkInfo chunkedBlocks =
       , odcPrefetchAhead = PrefetchChunksCount 0
       }
 
+modifyBlockHash :: TestBlock -> TestHash -> TestBlock
+modifyBlockHash b h = unsafeTestBlock (tbSlot b) h (tbValid b)
+
 numSlotsPerChunk :: ChunkInfo -> Word64
 numSlotsPerChunk (UniformChunkSize chunkSize) = numRegularBlocks chunkSize
 
@@ -1080,16 +1137,19 @@ tests =
         "onDemandIteratorFrom errors when starting from before the first block and in a lesser chunk"
         prop_onDemandIteratorFromErrorsWhenStartingFromBeforeFirstBlockAndInLowerChunk
     , testProperty
-        "onDemandIteratorForRange errors correctly when lower bound chunk is greater than upper bound chunk"
-        prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromChunkIsGreaterThanToChunk
+        "onDemandIteratorForRange errors correctly when stream bound hashes match and lower bound is exclusive"
+        prop_onDemandIteratorForRangeErrorsCorrectlyWhenStreamBoundHashesMatchAndLowerBoundIsExclusive
     , testProperty
-        "onDemandIteratorForRange errors correctly when lower bound is below first chunk, regardless of upper bound"
-        prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunkRegardlessOfUpperBound
+        "onDemandIteratorForRange errors correctly when lower bound is after upper bound"
+        prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsAfterUpperBound
     , testProperty
-        "onDemandIteratorForRange errors correctly when lower bound is in an extant chunk but does not exist, regardless of upper bound"
+        "onDemandIteratorForRange errors correctly when lower bound is below first chunk"
+        prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsBelowFirstChunk
+    , testProperty
+        "onDemandIteratorForRange errors correctly when lower bound is in an extant chunk but does not exist"
         prop_onDemandIteratorForRangeErrorsCorrectlyWhenLowerBoundIsInExtantChunkButDoesNotExist
     , testProperty
-        "onDemandIteratorForRange errors correctly when lower bound slot is greater than upper bound slot but in same chunk, and lower bound is valid"
+        "onDemandIteratorForRange errors correctly when lower bound slot is greater than upper bound slot but in same chunk"
         prop_onDemandIteratorForRangeErrorsCorrectlyWhenFromSlotIsGreaterThanToSlotButChunkOrderIsOKAndLowerBoundIsValid
     , testProperty
         "onDemandIteratorForRange is correct for valid bounds with lower strictly less than upper"
